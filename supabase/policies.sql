@@ -1,0 +1,1 @@
+-- Privacy rules live in migrations/002_rls.sql (kept as one ordered migration).

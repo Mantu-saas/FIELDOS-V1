@@ -1,0 +1,26 @@
+:root { --slate:#0F172A; --emerald:#059669; --ice:#F8FAFC; --char:#334155; }
+* { box-sizing: border-box; }
+body { margin:0; font-family:Inter,Roboto,system-ui,sans-serif; background:var(--ice); color:var(--char); font-size:17px; }
+h1,h2 { font-family:'Plus Jakarta Sans',Inter,sans-serif; font-weight:800; color:var(--slate); margin:0 0 12px; }
+.center { min-height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column; padding:16px; }
+.auth { min-height:100vh; background:var(--slate); padding:24px 16px; display:flex; flex-direction:column; gap:20px; align-items:center; }
+.brand { text-align:center; color:var(--ice); }
+.brand h1 { color:var(--ice); font-size:40px; margin:0; text-transform:lowercase; }
+.card { background:#fff; border-radius:16px; padding:20px; width:100%; max-width:420px; box-shadow:0 2px 8px rgba(15,23,42,.15); }
+label { display:block; font-weight:500; margin-bottom:14px; }
+input { display:block; width:100%; margin-top:6px; padding:12px; font-size:17px; border:1px solid #cbd5e1; border-radius:10px; color:var(--slate); }
+button { font-family:inherit; font-size:17px; cursor:pointer; }
+button.primary { width:100%; padding:14px; border:0; border-radius:12px; background:var(--emerald); color:#fff; font-weight:700; }
+button.primary:disabled { opacity:.6; }
+button.link { background:none; border:0; color:var(--emerald); padding:12px 0; width:100%; font-weight:500; }
+button.link.light { color:var(--ice); width:auto; padding:0; }
+.msg { color:#b91c1c; font-weight:500; }
+.small { font-size:14px; }
+.big { font-size:34px; font-weight:800; color:var(--emerald); margin:4px 0; }
+.shell { min-height:100vh; display:flex; flex-direction:column; }
+header { background:var(--slate); color:var(--ice); display:flex; justify-content:space-between; align-items:center; padding:14px 16px; }
+.logo { font-family:'Plus Jakarta Sans',sans-serif; font-weight:800; font-size:22px; }
+main { flex:1; padding:16px; display:flex; justify-content:center; align-items:flex-start; padding-bottom:80px; }
+nav { position:fixed; bottom:0; left:0; right:0; display:flex; background:var(--slate); }
+nav button { flex:1; padding:14px 0; background:none; border:0; color:#94a3b8; font-size:12px; font-weight:700; }
+nav button.on { color:var(--emerald); border-top:3px solid var(--emerald); }
