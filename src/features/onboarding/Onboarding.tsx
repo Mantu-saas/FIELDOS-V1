@@ -27,7 +27,13 @@ export default function Onboarding({ profile, onDone }: { profile: Profile; onDo
       work_start_time: start, work_end_time: end, preferred_home_time: home, onboarding_complete: true
     }).eq('id', profile.id).select().single()
     setBusy(false)
-    if (error) return setMsg('Could not save. Check your internet and try again.')
+    if (error) {
+      const missing = error.code === 'PGRST204' || error.message.includes('schema cache')
+      return setMsg(
+        'Could not save: ' + error.message +
+        (missing ? ' (A database column is missing. Send this exact message to your builder.)' : '')
+      )
+    }
     onDone(data as Profile)
   }
 
