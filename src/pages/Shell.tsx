@@ -6,7 +6,7 @@ import CustomersView from '../features/customers/CustomersView'
 import SalesView from '../features/sales/SalesView'
 import RoutePage from '../features/route/RoutePage'
 import HealthPage from '../features/health/HealthPage'
-
+import CoachPage from '../features/coach/CoachPage'
 const TABS = ['TODAY', 'SALES', 'ROUTE', 'HEALTH', 'COACH'] as const
 
 export default function Shell({ profile }: { profile: Profile }) {
@@ -65,11 +65,8 @@ export default function Shell({ profile }: { profile: Profile }) {
           )}
 
           {tab === 'COACH' && (
-            <div className="card">
-              <h2>COACH</h2>
-              <p>Coming in a later milestone.</p>
-            </div>
-          )}
+  <CoachPage userId={profile.id} />
+)}
 
         </div>
       </main>
