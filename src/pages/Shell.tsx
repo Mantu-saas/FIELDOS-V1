@@ -4,6 +4,7 @@ import type { Profile } from '../types'
 import TodayPage from '../features/today/TodayPage'
 import CustomersView from '../features/customers/CustomersView'
 import SalesView from '../features/sales/SalesView'
+import RoutePage from '../features/route/RoutePage'
 
 const TABS = ['TODAY', 'SALES', 'ROUTE', 'HEALTH', 'COACH'] as const
 
@@ -25,7 +26,8 @@ export default function Shell({ profile }: { profile: Profile }) {
               {sub === 'customers' ? <CustomersView userId={profile.id} /> : <SalesView userId={profile.id} />}
             </div>
           )}
-          {(tab === 'ROUTE' || tab === 'HEALTH' || tab === 'COACH') && <div className="card"><h2>{tab}</h2><p>Coming in a later milestone.</p></div>}
+          {tab === 'ROUTE' && <RoutePage userId={profile.id} />}
+          {(tab === 'HEALTH' || tab === 'COACH') && <div className="card"><h2>{tab}</h2><p>Coming in a later milestone.</p></div>}
         </div>
       </main>
       <nav>{TABS.map(t => <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}</nav>

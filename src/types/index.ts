@@ -32,3 +32,27 @@ export type Sale = {
   status: string
   product_category: string | null
 }
+
+export type VisitRow = {
+  id: string
+  customer_id: string
+  planned_start: string | null
+  status: string
+  sale_amount: number
+  lead_amount: number
+  collection_amount: number
+  notes: string | null
+  next_action: string | null
+  follow_up_date: string | null
+  customers: { name: string; address: string | null; phone: string | null } | null
+}
+
+export type FollowUpRow = {
+  id: string
+  customer_id: string
+  due_date: string
+  action: string
+  expected_value: number
+  status: string
+  customers: { name: string } | null
+}
