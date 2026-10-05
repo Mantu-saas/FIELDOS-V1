@@ -42,3 +42,9 @@ select, textarea { display:block; width:100%; margin-top:6px; padding:12px; font
 .btn { flex:1; text-align:center; padding:12px; border-radius:12px; background:var(--emerald); color:#fff; font-weight:700; text-decoration:none; }
 .line { display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid #e2e8f0; font-size:15px; }
 .small-btn { width:auto; padding:0 0 0 10px; font-size:13px; color:#b91c1c; }
+.range { padding:0; border:0; margin-top:10px; accent-color:#059669; }
+.tip { background:#ecfdf5; border-left:4px solid #059669; padding:12px; border-radius:8px; margin:12px 0; }
+.coach p { margin:8px 0; }
+details { border-top:1px solid #e2e8f0; padding:8px 0; }
+summary { cursor:pointer; font-weight:500; }
+button.item:disabled { opacity:.6; }
