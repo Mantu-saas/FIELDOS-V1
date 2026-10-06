@@ -1,8 +1,19 @@
 // MY WEEK helpers. Uses the existing personal_events table only (no schema changes).
+
 import { supabase } from './supabase'
 
-export const CATEGORIES = ['work', 'family', 'health', 'finance', 'travel', 'personal', 'important'] as const
+export const CATEGORIES = [
+  'work',
+  'family',
+  'health',
+  'finance',
+  'travel',
+  'personal',
+  'important'
+] as const
+
 export const PRIORITIES = ['low', 'normal', 'high'] as const
+
 export const REMINDERS = [
   { value: 'none', label: 'No reminder', minutes: null as number | null },
   { value: '15', label: '15 minutes before', minutes: 15 },
@@ -10,7 +21,16 @@ export const REMINDERS = [
   { value: '60', label: '60 minutes before', minutes: 60 },
   { value: '1440', label: '1 day before', minutes: 1440 }
 ]
-export const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+export const DAY_NAMES = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday'
+]
 
 export type PersonalEvent = {
   id: string
@@ -42,68 +62,161 @@ export type NewEvent = {
   reminderMinutes: number | null
 }
 
-// ---- India (Asia/Kolkata) date helpers. Dates are plain YYYY-MM-DD strings. ----
+// ----------------------------------------------------
+// India / Asia-Kolkata date helpers
+// ----------------------------------------------------
+
 const IST = 'Asia/Kolkata'
-export const istDate = (d: Date): string => new Intl.DateTimeFormat('en-CA', { timeZone: IST }).format(d)
-export const istToday = (): string => istDate(new Date())
+
+export const istDate = (date: Date): string =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: IST
+  }).format(date)
+
+export const istToday = (): string =>
+  istDate(new Date())
+
+export const isToday = (date: Date): boolean =>
+  istDate(date) === istToday()
 
 export function addDaysStr(date: string, n: number): string {
   const [y, m, d] = date.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+  const value = new Date(Date.UTC(y, m - 1, d))
+  value.setUTCDate(value.getUTCDate() + n)
+
+  return value.toISOString().slice(0, 10)
 }
 
-// Monday of the week containing `date`. Sunday belongs to the week that started the Monday before.
 export function weekStartMonday(date: string): string {
   const [y, m, d] = date.split('-').map(Number)
-  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay() // 0 = Sunday
-  return addDaysStr(date, -((dow + 6) % 7))
+  const value = new Date(Date.UTC(y, m - 1, d))
+
+  const day = value.getUTCDay()
+  const diff = day === 0 ? -6 : 1 - day
+
+  value.setUTCDate(value.getUTCDate() + diff)
+
+  return value.toISOString().slice(0, 10)
 }
 
-export const weekDates = (monday: string): string[] => [0, 1, 2, 3, 4, 5, 6].map(i => addDaysStr(monday, i))
+export function weekDates(monday: string): string[] {
+  return Array.from({ length: 7 }, (_, index) =>
+    addDaysStr(monday, index)
+  )
+}
+export function istStamp(date: string, time: string): string {
+  return `${date}T${time}+05:30`
+}
 
-// Builds a timestamp that carries the India offset, e.g. 2026-10-06T10:30:00+05:30
-export const istStamp = (date: string, time: string): string => `${date}T${time}:00+05:30`
+export function formatTimeIST(value: string | null): string {
+  if (!value) return ''
 
-export function formatTimeIST(iso: string): string {
-  return new Intl.DateTimeFormat('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(iso))
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: IST,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  }).format(new Date(value))
 }
 
 export function formatDayShort(date: string): string {
   const [y, m, d] = date.split('-').map(Number)
-  return new Intl.DateTimeFormat('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'short' }).format(new Date(Date.UTC(y, m - 1, d)))
+  const value = new Date(Date.UTC(y, m - 1, d))
+
+  return new Intl.DateTimeFormat('en-IN', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC'
+  }).format(value)
 }
 
-export const inrText = (n: number): string =>
-  '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n)
+export function inrText(value: number | null): string {
+  if (value === null || value === undefined) return ''
 
-// ---- Database access ----
-export async function loadWeekEvents(userId: string, monday: string): Promise<{ events: PersonalEvent[]; error: string | null }> {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0
+  }).format(Number(value))
+}
+
+// ----------------------------------------------------
+// Load events for one week
+// ----------------------------------------------------
+
+export async function loadWeekEvents(
+  userId: string,
+  monday: string
+): Promise<{
+  events: PersonalEvent[]
+  error: string
+}> {
+  const weekEnd = addDaysStr(monday, 7)
+
   const { data, error } = await supabase
     .from('personal_events')
-    .select('id,user_id,title,category,starts_at,ends_at,all_day,priority,location,amount,notes,reminder_minutes,status')
+    .select(
+      'id,user_id,title,category,starts_at,ends_at,all_day,priority,location,amount,notes,reminder_minutes,status'
+    )
     .eq('user_id', userId)
     .gte('starts_at', istStamp(monday, '00:00'))
-    .lt('starts_at', istStamp(addDaysStr(monday, 7), '00:00'))
+    .lt('starts_at', istStamp(weekEnd, '00:00'))
     .order('starts_at', { ascending: true })
-  if (error) return { events: [], error: error.message }
-  const events = ((data ?? []) as PersonalEvent[]).map(e => ({ ...e, amount: e.amount === null ? null : Number(e.amount) }))
-  return { events, error: null }
+
+  if (error) {
+    return {
+      events: [],
+      error: error.message
+    }
+  }
+
+  return {
+    events: (data ?? []) as PersonalEvent[],
+    error: ''
+  }
 }
 
-export async function createEvent(e: NewEvent): Promise<string | null> {
-  const { error } = await supabase.from('personal_events').insert({
-    user_id: e.userId, // required: the table has no default for user_id
-    title: e.title,
-    category: e.category,
-    starts_at: e.startsAt,
-    ends_at: e.endsAt,
-    all_day: e.allDay,
-    priority: e.priority,
-    location: e.location,
-    amount: e.amount,
-    notes: e.notes,
-    reminder_minutes: e.reminderMinutes,
-    status: 'planned'
-  })
-  return error ? error.message : null
+// ----------------------------------------------------
+// Create event
+// ----------------------------------------------------
+
+export async function createEvent(
+  event: NewEvent
+): Promise<{
+  event: PersonalEvent | null
+  error: string
+}> {
+  const { data, error } = await supabase
+    .from('personal_events')
+    .insert({
+      user_id: event.userId,
+      title: event.title,
+      category: event.category,
+      starts_at: event.startsAt,
+      ends_at: event.endsAt,
+      all_day: event.allDay,
+      priority: event.priority,
+      location: event.location,
+      amount: event.amount,
+      notes: event.notes,
+      reminder_minutes: event.reminderMinutes,
+      status: 'planned'
+    })
+    .select(
+      'id,user_id,title,category,starts_at,ends_at,all_day,priority,location,amount,notes,reminder_minutes,status'
+    )
+    .single()
+
+  if (error) {
+    return {
+      event: null,
+      error: error.message
+    }
+  }
+
+  return {
+    event: data as PersonalEvent,
+    error: ''
+  }
 }
