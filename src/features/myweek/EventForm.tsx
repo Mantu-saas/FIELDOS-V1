@@ -1,26 +1,60 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Profile } from '../../types'
 import {
   CATEGORIES,
   PRIORITIES,
   REMINDERS,
   createEvent,
-  istStamp
+  updateEvent,
+  istStamp,
+  type PersonalEvent
 } from '../../lib/personalEvents'
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
+function inputDate(value: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date(value))
+
+  const get = (type: string) =>
+    parts.find(part => part.type === type)?.value ?? ''
+
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+
+function inputTime(value: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date(value))
+
+  const get = (type: string) =>
+    parts.find(part => part.type === type)?.value ?? ''
+
+  return `${get('hour')}:${get('minute')}`
+}
+
 export default function EventForm({
   profile,
   defaultDate,
+  event,
   onSaved,
   onCancel
 }: {
   profile: Profile
   defaultDate: string
+  event?: PersonalEvent | null
   onSaved: () => void
   onCancel: () => void
 }) {
+  const editing = Boolean(event)
+
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('work')
   const [startDate, setStartDate] = useState(defaultDate)
@@ -35,6 +69,63 @@ export default function EventForm({
   const [reminder, setReminder] = useState('30')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!event) {
+      setTitle('')
+      setCategory('work')
+      setStartDate(defaultDate)
+      setStartTime('10:00')
+      setAllDay(false)
+      setEndDate('')
+      setEndTime('')
+      setPriority('normal')
+      setLocation('')
+      setAmount('')
+      setNotes('')
+      setReminder('30')
+      setMsg('')
+      return
+    }
+
+    setTitle(event.title)
+    setCategory(event.category)
+    setStartDate(inputDate(event.starts_at))
+    setStartTime(
+      event.all_day
+        ? '00:00'
+        : inputTime(event.starts_at)
+    )
+    setAllDay(event.all_day)
+    setEndDate(
+      event.ends_at
+        ? inputDate(event.ends_at)
+        : ''
+    )
+    setEndTime(
+      event.ends_at && !event.all_day
+        ? inputTime(event.ends_at)
+        : ''
+    )
+    setPriority(event.priority)
+    setLocation(event.location ?? '')
+    setAmount(
+      event.amount === null
+        ? ''
+        : String(event.amount)
+    )
+    setNotes(event.notes ?? '')
+
+    const reminderOption = REMINDERS.find(
+      item => item.minutes === event.reminder_minutes
+    )
+
+    setReminder(
+      reminderOption?.value ?? 'none'
+    )
+
+    setMsg('')
+  }, [event, defaultDate])
 
   async function save() {
     setMsg('')
@@ -51,13 +142,18 @@ export default function EventForm({
       return setMsg('Please choose a start time.')
     }
 
-    const amt = amount === '' ? null : Number(amount)
+    const amt =
+      amount === ''
+        ? null
+        : Number(amount)
 
     if (
       amt !== null &&
       (!Number.isFinite(amt) || amt < 0)
     ) {
-      return setMsg('Amount must be a number (0 or more).')
+      return setMsg(
+        'Amount must be a number (0 or more).'
+      )
     }
 
     const startsAt = istStamp(
@@ -75,7 +171,10 @@ export default function EventForm({
           )
         }
 
-        endsAt = istStamp(endDate, '23:59')
+        endsAt = istStamp(
+          endDate,
+          '23:59'
+        )
       }
     } else if (endTime || endDate) {
       if (!endTime) {
@@ -101,7 +200,7 @@ export default function EventForm({
 
     setBusy(true)
 
-    const result = await createEvent({
+    const payload = {
       userId: profile.id,
       title: title.trim(),
       category,
@@ -114,15 +213,24 @@ export default function EventForm({
       notes: notes.trim() || null,
       reminderMinutes:
         REMINDERS.find(
-          r => r.value === reminder
+          item => item.value === reminder
         )?.minutes ?? null
-    })
+    }
+
+    const result = editing && event
+      ? await updateEvent(
+          event.id,
+          payload
+        )
+      : await createEvent(payload)
 
     setBusy(false)
 
     if (result.error) {
       return setMsg(
-        'Could not save: ' + result.error
+        editing
+          ? 'Could not update: ' + result.error
+          : 'Could not save: ' + result.error
       )
     }
 
@@ -131,13 +239,17 @@ export default function EventForm({
 
   return (
     <div className="card">
-      <h2>Add event</h2>
+      <h2>
+        {editing ? 'Edit event' : 'Add event'}
+      </h2>
 
       <label>
         Title
         <input
           value={title}
-          onChange={e => setTitle(e.target.value)}
+          onChange={e =>
+            setTitle(e.target.value)
+          }
         />
       </label>
 
@@ -218,8 +330,7 @@ export default function EventForm({
             onChange={e =>
               setEndTime(e.target.value)
             }
-          />
-        </label>
+        />
       )}
 
       <label>
@@ -309,7 +420,13 @@ export default function EventForm({
         disabled={busy}
         onClick={save}
       >
-        {busy ? 'Saving…' : 'Save event'}
+        {busy
+          ? editing
+            ? 'Saving changes…'
+            : 'Saving…'
+          : editing
+            ? 'Save changes'
+            : 'Save event'}
       </button>
 
       <button
