@@ -217,12 +217,13 @@ export default function EventForm({
         )?.minutes ?? null
     }
 
-    const result = editing && event
-      ? await updateEvent(
-          event.id,
-          payload
-        )
-      : await createEvent(payload)
+    const result =
+      editing && event
+        ? await updateEvent(
+            event.id,
+            payload
+          )
+        : await createEvent(payload)
 
     setBusy(false)
 
@@ -330,7 +331,8 @@ export default function EventForm({
             onChange={e =>
               setEndTime(e.target.value)
             }
-        />
+          />
+        </label>
       )}
 
       <label>
