@@ -134,6 +134,10 @@ export default function TodayPage({ profile }: { profile: Profile }) {
     primaryEvent?.category === 'travel' ||
     eventText.includes('travel')
 
+  const isWorkingDay =
+    primaryEvent?.category === 'work' ||
+    eventText.includes('working')
+
   let dayHeadline = ''
   let dayMessage = ''
   let dayPunchline = ''
@@ -171,6 +175,13 @@ export default function TodayPage({ profile }: { profile: Profile }) {
       'Do not turn every free hour into a work hour.'
     dayPunchline =
       'Rest is part of the journey too.'
+  } else if (isWorkingDay) {
+    dayIcon = '💼'
+    dayHeadline = 'Today is a working day.'
+    dayMessage =
+      'Focus on the customers and work that matter most today. Keep your planned home time protected.'
+    dayPunchline =
+      'A productive day should still leave room for life.'
   }
 
   let note = ''
