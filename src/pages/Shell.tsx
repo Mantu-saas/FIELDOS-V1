@@ -41,8 +41,8 @@ export default function Shell({ profile }: { profile: Profile }) {
             </div>
           )}
           {tab === 'ROUTE' && <RoutePage userId={profile.id} />}
-          {tab === 'HEALTH' && <CoachPage userId={profile.id} />}
-          {tab === 'COACH' && <CoachPage profile={profile} />}
+          {tab === 'HEALTH' && <HealthPage userId={profile.id} />}
+          {tab === 'COACH' && <CoachPage userId={profile.id} />}
         </div>
       </main>
       <nav>{TABS.map(t => <button key={t} className={t === tab ? 'on' : ''} onClick={() => { setTab(t); setView('today') }}>{t}</button>)}</nav>
