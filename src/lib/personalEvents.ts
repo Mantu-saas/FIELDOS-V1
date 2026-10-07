@@ -104,6 +104,7 @@ export function weekDates(monday: string): string[] {
     addDaysStr(monday, index)
   )
 }
+
 export function istStamp(date: string, time: string): string {
   return `${date}T${time}+05:30`
 }
@@ -203,6 +204,51 @@ export async function createEvent(
       reminder_minutes: event.reminderMinutes,
       status: 'planned'
     })
+    .select(
+      'id,user_id,title,category,starts_at,ends_at,all_day,priority,location,amount,notes,reminder_minutes,status'
+    )
+    .single()
+
+  if (error) {
+    return {
+      event: null,
+      error: error.message
+    }
+  }
+
+  return {
+    event: data as PersonalEvent,
+    error: ''
+  }
+}
+
+// ----------------------------------------------------
+// Update existing event
+// ----------------------------------------------------
+
+export async function updateEvent(
+  eventId: string,
+  event: NewEvent
+): Promise<{
+  event: PersonalEvent | null
+  error: string
+}> {
+  const { data, error } = await supabase
+    .from('personal_events')
+    .update({
+      title: event.title,
+      category: event.category,
+      starts_at: event.startsAt,
+      ends_at: event.endsAt,
+      all_day: event.allDay,
+      priority: event.priority,
+      location: event.location,
+      amount: event.amount,
+      notes: event.notes,
+      reminder_minutes: event.reminderMinutes
+    })
+    .eq('id', eventId)
+    .eq('user_id', event.userId)
     .select(
       'id,user_id,title,category,starts_at,ends_at,all_day,priority,location,amount,notes,reminder_minutes,status'
     )
