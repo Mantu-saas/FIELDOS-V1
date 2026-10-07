@@ -321,53 +321,53 @@ export default function CoachPage({ userId }: CoachPageProps) {
       )
 
     let response =
-      'TODAY\\n\\n'
+      'TODAY\n\n'
 
     if (
       dayWeight === 'heavy' ||
       homeTime === 'late'
     ) {
       response +=
-        'Your day looks overloaded. Protect your evening first. Keep the highest-value customer conversations and avoid adding unnecessary visits.\\n\\n'
+        'Your day looks overloaded. Protect your evening first. Keep the highest-value customer conversations and avoid adding unnecessary visits.\n\n'
     } else if (
       energy !== null &&
       energy <= 3
     ) {
       response +=
-        'Your energy is low today. Focus on the few actions most likely to create revenue or protect an important relationship.\\n\\n'
+        'Your energy is low today. Focus on the few actions most likely to create revenue or protect an important relationship.\n\n'
     } else if (
       stress !== null &&
       stress >= 8
     ) {
       response +=
-        'Your stress level is high. Reduce unnecessary work and concentrate on the most important customer actions.\\n\\n'
+        'Your stress level is high. Reduce unnecessary work and concentrate on the most important customer actions.\n\n'
     } else {
       response +=
-        'Your current health check-in does not show a major warning. Use your available time for the highest-value work.\\n\\n'
+        'Your current health check-in does not show a major warning. Use your available time for the highest-value work.\n\n'
     }
 
     response +=
-      `Planned/rescheduled visits: ${planned.length}\\n`
+      `Planned/rescheduled visits: ${planned.length}\n`
 
     response +=
-      `Completed visits: ${visited}\\n`
+      `Completed visits: ${visited}\n`
 
     response +=
-      `Follow-ups due today or overdue: ${todayFollowUps.length}\\n`
+      `Follow-ups due today or overdue: ${todayFollowUps.length}\n`
 
     response +=
-      `Sales recorded today: ₹${todaySales.toLocaleString('en-IN')}\\n`
+      `Sales recorded today: ₹${todaySales.toLocaleString('en-IN')}\n`
 
     if (todayFollowUps.length > 0) {
       const first = todayFollowUps[0]
 
       response +=
-        `\\nFirst follow-up to protect: ${customerName(first.customer_id)} — ${first.action}.`
+        `\nFirst follow-up to protect: ${customerName(first.customer_id)} — ${first.action}.`
     } else if (planned.length > 0) {
       const first = planned[0]
 
       response +=
-        `\\nNext practical action: prepare for ${customerName(first.customer_id)} at ${formatVisitTime(first.planned_start)}.`
+        `\nNext practical action: prepare for ${customerName(first.customer_id)} at ${formatVisitTime(first.planned_start)}.`
     } else {
       const priorityCustomer = customers
         .slice()
@@ -375,10 +375,10 @@ export default function CoachPage({ userId }: CoachPageProps) {
 
       if (priorityCustomer) {
         response +=
-          `\\nNext practical action: contact ${priorityCustomer.name}, your highest-priority active customer.`
+          `\nNext practical action: contact ${priorityCustomer.name}, your highest-priority active customer.`
       } else {
         response +=
-          '\\nNext practical action: choose one high-value customer and make one revenue-focused move.'
+          '\nNext practical action: choose one high-value customer and make one revenue-focused move.'
       }
     }
 
@@ -411,14 +411,14 @@ export default function CoachPage({ userId }: CoachPageProps) {
     )
 
     let response =
-      `TOMORROW — ${tomorrow}\\n\\n`
+      `TOMORROW — ${tomorrow}\n\n`
 
     if (tomorrowVisits.length === 0) {
       response +=
-        'I do not currently see any planned or rescheduled visits for tomorrow in FieldOS.\\n\\n'
+        'I do not currently see any planned or rescheduled visits for tomorrow in FieldOS.\n\n'
     } else {
       response +=
-        `You currently have ${tomorrowVisits.length} planned/rescheduled visit${tomorrowVisits.length === 1 ? '' : 's'} tomorrow.\\n\\n`
+        `You currently have ${tomorrowVisits.length} planned/rescheduled visit${tomorrowVisits.length === 1 ? '' : 's'} tomorrow.\n\n`
 
       tomorrowVisits.slice(0, 8).forEach((visit, index) => {
         response +=
@@ -433,13 +433,13 @@ export default function CoachPage({ userId }: CoachPageProps) {
             ` — priority ${customer.priority}`
         }
 
-        response += '\\n'
+        response += '\n'
       })
     }
 
     if (tomorrowFollowUps.length > 0) {
       response +=
-        `\\nTomorrow also has ${tomorrowFollowUps.length} follow-up${tomorrowFollowUps.length === 1 ? '' : 's'} due:\\n`
+        `\nTomorrow also has ${tomorrowFollowUps.length} follow-up${tomorrowFollowUps.length === 1 ? '' : 's'} due:\n`
 
       tomorrowFollowUps
         .slice(0, 5)
@@ -454,18 +454,18 @@ export default function CoachPage({ userId }: CoachPageProps) {
               ).toLocaleString('en-IN')}`
           }
 
-          response += '\\n'
+          response += '\n'
         })
     } else {
       response +=
-        '\\nThere are no follow-ups currently due tomorrow.'
+        '\nThere are no follow-ups currently due tomorrow.'
     }
 
     const energy = health?.energy ?? null
     const dayWeight = health?.day_weight
     const homeTime = health?.home_time_status
 
-    response += '\\n\\nCOACH PRIORITY\\n'
+    response += '\n\nCOACH PRIORITY\n'
 
     if (
       tomorrowVisits.length >= 5 ||
@@ -489,7 +489,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
       const firstVisit = tomorrowVisits[0]
 
       response +=
-        `\\n\\nFirst priority: ${customerName(firstVisit.customer_id)} at ${formatVisitTime(firstVisit.planned_start)}.`
+        `\n\nFirst priority: ${customerName(firstVisit.customer_id)} at ${formatVisitTime(firstVisit.planned_start)}.`
 
       if (firstVisit.next_action) {
         response +=
@@ -498,7 +498,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
     }
 
     response +=
-      '\\n\\nBefore ending today: review tomorrow’s first visit, prepare the required information, and confirm any important follow-up.'
+      '\n\nBefore ending today: review tomorrow’s first visit, prepare the required information, and confirm any important follow-up.'
 
     return response
   }
@@ -517,7 +517,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
       .sort((a, b) => a.due_date.localeCompare(b.due_date))
 
     let response =
-      'FOLLOW-UPS\\n\\n'
+      'FOLLOW-UPS\n\n'
 
     if (relevantFollowUps.length === 0) {
       return (
@@ -540,20 +540,20 @@ export default function CoachPage({ userId }: CoachPageProps) {
 
     if (overdue.length > 0) {
       response +=
-        `Overdue: ${overdue.length}\\n`
+        `Overdue: ${overdue.length}\n`
     }
 
     if (todayItems.length > 0) {
       response +=
-        `Due today: ${todayItems.length}\\n`
+        `Due today: ${todayItems.length}\n`
     }
 
     if (tomorrowItems.length > 0) {
       response +=
-        `Due tomorrow: ${tomorrowItems.length}\\n`
+        `Due tomorrow: ${tomorrowItems.length}\n`
     }
 
-    response += '\\nPriority follow-ups:\\n'
+    response += '\nPriority follow-ups:\n'
 
     relevantFollowUps
       .slice(0, 8)
@@ -568,11 +568,11 @@ export default function CoachPage({ userId }: CoachPageProps) {
             ).toLocaleString('en-IN')}`
         }
 
-        response += '\\n'
+        response += '\n'
       })
 
     response +=
-      '\\nCoach recommendation: clear overdue and today’s follow-ups before spending time on lower-priority work.'
+      '\nCoach recommendation: clear overdue and today’s follow-ups before spending time on lower-priority work.'
 
     return response
   }
@@ -592,7 +592,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
       })
 
     let response =
-      'CUSTOMER PRIORITY\\n\\n'
+      'CUSTOMER PRIORITY\n\n'
 
     if (rankedCustomers.length === 0) {
       return (
@@ -602,7 +602,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
     }
 
     response +=
-      'Based on your current active customer data:\\n\\n'
+      'Based on your current active customer data:\n\n'
 
     rankedCustomers
       .slice(0, 8)
@@ -617,11 +617,11 @@ export default function CoachPage({ userId }: CoachPageProps) {
             ).toLocaleString('en-IN')}`
         }
 
-        response += '\\n'
+        response += '\n'
       })
 
     response +=
-      '\\nCoach recommendation: start with the highest-priority customer where there is a clear revenue or relationship action.'
+      '\nCoach recommendation: start with the highest-priority customer where there is a clear revenue or relationship action.'
 
     return response
   }
@@ -650,32 +650,32 @@ export default function CoachPage({ userId }: CoachPageProps) {
       tomorrowFollowUps.length
 
     let response =
-      'TOMORROW WORKLOAD\\n\\n'
+      'TOMORROW WORKLOAD\n\n'
 
     response +=
-      `Planned/rescheduled visits: ${tomorrowVisits.length}\\n`
+      `Planned/rescheduled visits: ${tomorrowVisits.length}\n`
 
     response +=
-      `Follow-ups due tomorrow: ${tomorrowFollowUps.length}\\n`
+      `Follow-ups due tomorrow: ${tomorrowFollowUps.length}\n`
 
     response +=
-      `Total visible priority work items: ${totalWorkItems}\\n`
+      `Total visible priority work items: ${totalWorkItems}\n`
 
     if (
       tomorrowVisits.length >= 6 ||
       totalWorkItems >= 8
     ) {
       response +=
-        '\\nCoach assessment: Tomorrow looks heavily loaded. Avoid adding low-value visits. Protect your highest-value customer work and home-time target.'
+        '\nCoach assessment: Tomorrow looks heavily loaded. Avoid adding low-value visits. Protect your highest-value customer work and home-time target.'
     } else if (
       tomorrowVisits.length >= 4 ||
       totalWorkItems >= 6
     ) {
       response +=
-        '\\nCoach assessment: Tomorrow has a moderate workload. Keep the schedule disciplined and avoid unnecessary travel.'
+        '\nCoach assessment: Tomorrow has a moderate workload. Keep the schedule disciplined and avoid unnecessary travel.'
     } else {
       response +=
-        '\\nCoach assessment: Tomorrow currently looks manageable based on the FieldOS records available.'
+        '\nCoach assessment: Tomorrow currently looks manageable based on the FieldOS records available.'
     }
 
     return response
@@ -700,29 +700,29 @@ export default function CoachPage({ userId }: CoachPageProps) {
     ).length
 
     let response =
-      'TODAY PERFORMANCE\\n\\n'
+      'TODAY PERFORMANCE\n\n'
 
     response +=
-      `Completed visits: ${completedVisits}\\n`
+      `Completed visits: ${completedVisits}\n`
 
     response +=
-      `Sales recorded: ₹${todaySales.toLocaleString('en-IN')}\\n`
+      `Sales recorded: ₹${todaySales.toLocaleString('en-IN')}\n`
 
     response +=
-      `Due/overdue follow-ups: ${todayFollowUps}\\n`
+      `Due/overdue follow-ups: ${todayFollowUps}\n`
 
     if (todaySales > 0 && completedVisits > 0) {
       response +=
-        '\\nCoach assessment: You have created measurable activity and revenue today. Protect the follow-up work so today’s activity turns into repeatable results.'
+        '\nCoach assessment: You have created measurable activity and revenue today. Protect the follow-up work so today’s activity turns into repeatable results.'
     } else if (completedVisits > 0) {
       response +=
-        '\\nCoach assessment: You completed customer activity today. Your next priority is converting the strongest opportunities into follow-ups or sales.'
+        '\nCoach assessment: You completed customer activity today. Your next priority is converting the strongest opportunities into follow-ups or sales.'
     } else if (todaySales > 0) {
       response +=
-        '\\nCoach assessment: You recorded sales today. Make sure the related customer actions and follow-ups are captured in FieldOS.'
+        '\nCoach assessment: You recorded sales today. Make sure the related customer actions and follow-ups are captured in FieldOS.'
     } else {
       response +=
-        '\\nCoach assessment: No completed visits or confirmed sales are currently visible for today. Focus on the highest-value customer action rather than increasing activity for its own sake.'
+        '\nCoach assessment: No completed visits or confirmed sales are currently visible for today. Focus on the highest-value customer action rather than increasing activity for its own sake.'
     }
 
     return response
@@ -971,6 +971,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
           <strong>
             ₹
             {sales
+              .filter(sale => sale.status !== 'cancelled')
               .reduce(
                 (sum, sale) =>
                   sum + Number(sale.amount || 0),
