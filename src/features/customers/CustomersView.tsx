@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
@@ -14,7 +15,11 @@ const empty = {
   notes: ''
 }
 
-export default function CustomersView({ userId }: { userId: string }) {
+export default function CustomersView({
+  userId
+}: {
+  userId: string
+}) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
@@ -36,9 +41,7 @@ export default function CustomersView({ userId }: { userId: string }) {
 
     const s = await supabase
       .from('sales')
-      .select(
-        'id,customer_id,sale_date,amount,status,product_category'
-      )
+      .select('id,customer_id,sale_date,amount,status,product_category')
       .eq('user_id', userId)
 
     if (c.error) {
@@ -71,8 +74,7 @@ export default function CustomersView({ userId }: { userId: string }) {
       return setMsg('Customer name is required.')
     }
 
-    const pot =
-      f.potential === '' ? 0 : Number(f.potential)
+    const pot = f.potential === '' ? 0 : Number(f.potential)
 
     if (!Number.isFinite(pot) || pot < 0) {
       return setMsg('Potential must be a number.')
@@ -90,8 +92,7 @@ export default function CustomersView({ userId }: { userId: string }) {
         address: f.address.trim() || null,
         potential_amount: pot,
         priority: Number(f.priority),
-        usual_availability:
-          f.availability.trim() || null,
+        usual_availability: f.availability || null,
         notes: null
       })
 
@@ -107,11 +108,7 @@ export default function CustomersView({ userId }: { userId: string }) {
   }
 
   async function archive(id: string) {
-    if (
-      !window.confirm(
-        'Remove this customer from your list?'
-      )
-    ) {
+    if (!window.confirm('Remove this customer from your list?')) {
       return
     }
 
@@ -122,18 +119,14 @@ export default function CustomersView({ userId }: { userId: string }) {
       .eq('user_id', userId)
 
     if (error) {
-      return setMsg(
-        'Could not remove: ' + error.message
-      )
+      return setMsg('Could not remove: ' + error.message)
     }
 
     setSelected(null)
     await load()
   }
 
-  const sel = customers.find(
-    c => c.id === selected
-  )
+  const sel = customers.find(c => c.id === selected)
 
   if (sel) {
     const mine = sales.filter(
@@ -142,15 +135,12 @@ export default function CustomersView({ userId }: { userId: string }) {
         s.status !== 'cancelled'
     )
 
-    const last = [...mine].sort((a, b) =>
-      b.sale_date.localeCompare(a.sale_date)
+    const last = [...mine].sort(
+      (a, b) => b.sale_date.localeCompare(a.sale_date)
     )[0]
 
     const avg = mine.length
-      ? mine.reduce(
-          (t, s) => t + Number(s.amount),
-          0
-        ) / mine.length
+      ? mine.reduce((t, s) => t + Number(s.amount), 0) / mine.length
       : 0
 
     return (
@@ -171,7 +161,7 @@ export default function CustomersView({ userId }: { userId: string }) {
         </p>
 
         <p>
-          <b>Potential:</b>{' '}
+          <b>Potential per month:</b>{' '}
           {inr(Number(sel.potential_amount))}
         </p>
 
@@ -228,10 +218,7 @@ export default function CustomersView({ userId }: { userId: string }) {
           )}
 
           {sel.phone && (
-            <a
-              className="btn"
-              href={'tel:' + sel.phone}
-            >
+            <a className="btn" href={'tel:' + sel.phone}>
               Call
             </a>
           )}
@@ -252,13 +239,8 @@ export default function CustomersView({ userId }: { userId: string }) {
   if (adding) {
     const set =
       (k: keyof typeof empty) =>
-      (e: {
-        target: { value: string }
-      }) =>
-        setF({
-          ...f,
-          [k]: e.target.value
-        })
+      (e: { target: { value: string } }) =>
+        setF({ ...f, [k]: e.target.value })
 
     return (
       <div className="card">
@@ -284,6 +266,7 @@ export default function CustomersView({ userId }: { userId: string }) {
         <label>
           Phone (optional)
           <input
+            type="tel"
             inputMode="tel"
             value={f.phone}
             onChange={set('phone')}
@@ -306,10 +289,7 @@ export default function CustomersView({ userId }: { userId: string }) {
             onChange={e =>
               setF({
                 ...f,
-                potential: e.target.value.replace(
-                  /[^0-9.]/g,
-                  ''
-                )
+                potential: e.target.value.replace(/[^0-9.]/g, '')
               })
             }
           />
@@ -321,21 +301,11 @@ export default function CustomersView({ userId }: { userId: string }) {
             value={f.priority}
             onChange={set('priority')}
           >
-            <option value="1">
-              1 - Highest
-            </option>
-            <option value="2">
-              2 - High
-            </option>
-            <option value="3">
-              3 - Normal
-            </option>
-            <option value="4">
-              4 - Low
-            </option>
-            <option value="5">
-              5 - Lowest
-            </option>
+            <option value="1">1 - Highest</option>
+            <option value="2">2 - High</option>
+            <option value="3">3 - Normal</option>
+            <option value="4">4 - Low</option>
+            <option value="5">5 - Lowest</option>
           </select>
         </label>
 
@@ -393,34 +363,25 @@ export default function CustomersView({ userId }: { userId: string }) {
         </div>
       ) : customers.length === 0 ? (
         <div className="card">
-          <p>
-            No customers yet. Tap "Add customer"
-            to start.
-          </p>
+          <p>No customers yet. Tap "Add customer" to start.</p>
         </div>
       ) : (
         customers.map(c => (
           <button
             key={c.id}
             className="item"
-            onClick={() =>
-              setSelected(c.id)
-            }
+            onClick={() => setSelected(c.id)}
           >
             <span>
               <b>{c.name}</b>
               <br />
               <span className="small">
-                {c.customer_type ||
-                  'Customer'}{' '}
-                · Priority {c.priority}
+                {c.customer_type || 'Customer'} · Priority {c.priority}
               </span>
             </span>
 
             <span className="small">
-              {inr(
-                Number(c.potential_amount)
-              )}
+              {inr(Number(c.potential_amount))}
             </span>
           </button>
         ))
