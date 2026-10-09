@@ -9,6 +9,12 @@ export type Profile = {
   work_start_time: string | null
   work_end_time: string | null
   onboarding_complete: boolean
+
+  // My Life, My Why — personalisation
+  life_priorities: string[]
+  life_challenge: string | null
+  proud_in_90_days: string | null
+  personal_why: string | null
 }
 
 export type Customer = {
