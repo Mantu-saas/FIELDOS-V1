@@ -19,6 +19,22 @@ const cap = (s: string) =>
 const isCompleted = (status: string) =>
   ['completed', 'complete', 'done'].includes(status.toLowerCase())
 
+type FollowUpRow = {
+  id: string
+  customer_id: string | null
+  due_date: string
+  action: string
+  expected_value: number | null
+  status: string
+  customers?: { name: string } | { name: string }[] | null
+}
+
+function followUpCustomerName(item: FollowUpRow): string {
+  const related = item.customers
+  if (Array.isArray(related)) return related[0]?.name || 'Customer'
+  return related?.name || 'Customer'
+}
+
 function timeLabel(e: PersonalEvent): string {
   if (e.all_day) return 'All day'
 
@@ -59,6 +75,7 @@ export default function MyWeekPage({
   onBack: () => void
 }) {
   const [events, setEvents] = useState<PersonalEvent[]>([])
+  const [followUps, setFollowUps] = useState<FollowUpRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [summaryErrors, setSummaryErrors] = useState<string[]>([])
@@ -68,6 +85,7 @@ export default function MyWeekPage({
   const [editingEvent, setEditingEvent] =
     useState<PersonalEvent | null>(null)
   const [savingEventId, setSavingEventId] = useState<string | null>(null)
+  const [savingFollowUpId, setSavingFollowUpId] = useState<string | null>(null)
 
   // Rolling 7-day window: today plus the next six days.
   const today = istToday()
@@ -92,20 +110,24 @@ export default function MyWeekPage({
         supabase
           .from('sales')
           .select('id,amount')
+          .eq('user_id', profile.id)
           .gte('sale_date', today)
           .lt('sale_date', weekEnd),
 
         supabase
           .from('visits')
           .select('id,status')
+          .eq('user_id', profile.id)
           .gte('planned_start', startStamp)
           .lt('planned_start', endStamp),
 
         supabase
           .from('follow_ups')
-          .select('id,status')
+          .select('id,customer_id,due_date,action,expected_value,status,customers(name)')
+          .eq('user_id', profile.id)
           .gte('due_date', today)
           .lt('due_date', weekEnd)
+          .order('due_date', { ascending: true })
       ])
 
     setEvents(eventResult.events)
@@ -135,10 +157,8 @@ export default function MyWeekPage({
       status: string
     }[]
 
-    const followUps = (followUpsResult.data ?? []) as {
-      id: string
-      status: string
-    }[]
+    const loadedFollowUps = (followUpsResult.data ?? []) as FollowUpRow[]
+    setFollowUps(loadedFollowUps)
 
     setSummary({
       salesAmount: sales.reduce(
@@ -149,10 +169,8 @@ export default function MyWeekPage({
       visitsCompleted: visits.filter(
         visit => visit.status === 'visited'
       ).length,
-      followUpsCompleted: followUps.filter(
-        item => ['done', 'completed', 'complete'].includes(
-          item.status.toLowerCase()
-        )
+      followUpsCompleted: loadedFollowUps.filter(
+        item => isCompleted(item.status)
       ).length
     })
 
@@ -187,6 +205,27 @@ export default function MyWeekPage({
 
     await load()
     setSavingEventId(null)
+  }
+
+  async function changeFollowUpStatus(item: FollowUpRow) {
+    setError('')
+    setSavingFollowUpId(item.id)
+
+    const nextStatus = isCompleted(item.status) ? 'open' : 'done'
+    const { error: updateError } = await supabase
+      .from('follow_ups')
+      .update({ status: nextStatus })
+      .eq('id', item.id)
+      .eq('user_id', profile.id)
+
+    if (updateError) {
+      setError('Could not update this follow-up: ' + updateError.message)
+      setSavingFollowUpId(null)
+      return
+    }
+
+    await load()
+    setSavingFollowUpId(null)
   }
 
   if (adding || editingEvent) {
@@ -228,7 +267,8 @@ export default function MyWeekPage({
           Today + the next 6 days · India time
         </p>
         <p className="small">
-          Your planner moves forward automatically each day.
+          Your planner moves forward automatically each day. Follow-ups appear
+          on their due date below your personal events.
         </p>
         <button
           className="primary"
@@ -292,16 +332,19 @@ export default function MyWeekPage({
               istDate(new Date(event.starts_at)) === date
           )
 
-          const completedCount = list.filter(
-            event => isCompleted(event.status)
-          ).length
+          // Follow-ups are displayed from follow_ups directly; no duplicate
+          // personal_events rows are created. Dropped follow-ups stay hidden.
+          const dayFollowUps = followUps.filter(
+            item =>
+              item.due_date === date &&
+              !['dropped', 'cancelled'].includes(item.status.toLowerCase())
+          )
 
-          const plannedCount = list.filter(
-            event =>
-              event.status === 'planned' ||
-              (!isCompleted(event.status) &&
-                event.status !== 'cancelled')
-          ).length
+          const completedCount =
+            list.filter(event => isCompleted(event.status)).length +
+            dayFollowUps.filter(item => isCompleted(item.status)).length
+          const totalCount = list.length + dayFollowUps.length
+          const plannedCount = totalCount - completedCount
 
           const isToday = date === today
 
@@ -323,12 +366,12 @@ export default function MyWeekPage({
               </p>
 
               <p className="small">
-                {list.length === 0
-                  ? 'No events planned'
+                {totalCount === 0
+                  ? 'No events or follow-ups planned'
                   : `${completedCount} completed · ${plannedCount} remaining`}
               </p>
 
-              {list.length > 0 && (
+              {totalCount > 0 && (
                 <div
                   style={{
                     height: '6px',
@@ -341,10 +384,7 @@ export default function MyWeekPage({
                   <div
                     style={{
                       height: '100%',
-                      width: `${
-                        list.filter(event => isCompleted(event.status)).length /
-                        list.length * 100
-                      }%`,
+                      width: `${completedCount / totalCount * 100}%`,
                       background: '#059669',
                       borderRadius: '999px'
                     }}
@@ -430,6 +470,56 @@ export default function MyWeekPage({
                       >
                         Edit
                       </button>
+                    </span>
+                  </div>
+                )
+              })}
+
+              {dayFollowUps.map(item => {
+                const completed = isCompleted(item.status)
+                const customerName = followUpCustomerName(item)
+
+                return (
+                  <div
+                    key={`follow-up-${item.id}`}
+                    className="line"
+                    style={{
+                      alignItems: 'flex-start',
+                      gap: '12px',
+                      borderTop: '1px solid #e5e7eb',
+                      paddingTop: '10px',
+                      marginTop: '10px'
+                    }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <b style={completed ? { textDecoration: 'line-through' } : undefined}>
+                        Follow-up: {customerName}
+                      </b>
+                      <br />
+                      <span className="small">Customer follow-up · {cap(item.status)}</span>
+                      <br />
+                      <span>{item.action}</span>
+                      {item.expected_value !== null && Number(item.expected_value) > 0 && (
+                        <>
+                          <br />
+                          <b>{inrText(Number(item.expected_value))}</b>
+                        </>
+                      )}
+                      <br />
+                      <button
+                        className="link"
+                        disabled={savingFollowUpId === item.id}
+                        onClick={() => changeFollowUpStatus(item)}
+                      >
+                        {savingFollowUpId === item.id
+                          ? 'Saving…'
+                          : completed
+                            ? 'Mark as open'
+                            : '✓ Mark follow-up completed'}
+                      </button>
+                    </span>
+                    <span style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <span className="small">Due date</span>
                     </span>
                   </div>
                 )
