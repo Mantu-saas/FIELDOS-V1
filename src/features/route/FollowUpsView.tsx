@@ -42,7 +42,10 @@ export default function FollowUpsView({ userId }: { userId: string }) {
     setCustId(''); setAction(''); setValue(''); setAdding(false); load()
   }
 
-  const overdue = rows.filter(r => r.due_date < today).length
+  // Keep future-dated follow-ups out of the current Follow-ups list.
+  // My Week can show each follow-up on its actual due date.
+  const visibleRows = rows.filter(r => r.due_date <= today)
+  const overdue = visibleRows.filter(r => r.due_date < today).length
   return (
     <div className="stack">
       {adding ? (
@@ -65,8 +68,8 @@ export default function FollowUpsView({ userId }: { userId: string }) {
       {!adding && msg && <p className="msg">{msg}</p>}
       {!adding && overdue > 0 && <p className="msg">{overdue} overdue</p>}
       {loading ? <div className="card"><p>Loading…</p></div> :
-        rows.length === 0 ? <div className="card"><p>No open follow-ups.</p></div> :
-        rows.map(r => (
+        visibleRows.length === 0 ? <div className="card"><p>No follow-ups due today or overdue.</p></div> :
+        visibleRows.map(r => (
           <div key={r.id} className="card">
             <p><b>{r.customers?.name ?? 'Customer'}</b></p>
             <p>{r.action}</p>
