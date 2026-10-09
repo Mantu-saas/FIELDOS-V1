@@ -48,7 +48,20 @@ type Customer = {
   potential_amount: number
 }
 
+type PersonalEvent = {
+  id: string
+  title: string
+  category: string
+  starts_at: string
+  ends_at: string | null
+  all_day: boolean
+  priority: string
+  location: string | null
+  status: string
+}
+
 type CoachIntent =
+  | 'schedule'
   | 'today'
   | 'tomorrow'
   | 'followups'
@@ -68,13 +81,12 @@ export default function CoachPage({ userId }: CoachPageProps) {
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [personalEvents, setPersonalEvents] = useState<PersonalEvent[]>([])
 
   function dateString(date: Date) {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-
-    return `${year}-${month}-${day}`
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    }).format(date)
   }
 
   function todayString() {
@@ -138,6 +150,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
       followUpsResult,
       salesResult,
       customersResult,
+      eventsResult,
     ] = await Promise.all([
       supabase
         .from('health_checkins')
@@ -183,6 +196,14 @@ export default function CoachPage({ userId }: CoachPageProps) {
         .eq('active', true)
         .order('priority', { ascending: true })
         .limit(50),
+
+      supabase
+        .from('personal_events')
+        .select('id, title, category, starts_at, ends_at, all_day, priority, location, status')
+        .eq('user_id', userId)
+        .gte('starts_at', `${today}T00:00:00+05:30`)
+        .lt('starts_at', `${tomorrow}T00:00:00+05:30`)
+        .order('starts_at', { ascending: true }),
     ])
 
     if (healthResult.error) {
@@ -220,6 +241,10 @@ export default function CoachPage({ userId }: CoachPageProps) {
     setFollowUps((followUpsResult.data || []) as FollowUp[])
     setSales((salesResult.data || []) as Sale[])
     setCustomers((customersResult.data || []) as Customer[])
+    setPersonalEvents((eventsResult.data || []) as PersonalEvent[])
+    if (eventsResult.error) {
+      setError(`Personal events could not be loaded: ${eventsResult.error.message}`)
+    }
 
     setLoading(false)
   }
@@ -230,6 +255,23 @@ export default function CoachPage({ userId }: CoachPageProps) {
 
   function getIntent(userQuestion: string): CoachIntent {
     const q = userQuestion.toLowerCase().trim()
+
+    // Time/home/event questions must be detected before the word "customer".
+    if (
+      q.includes('get home') ||
+      q.includes('home in time') ||
+      q.includes('home on time') ||
+      q.includes('party') ||
+      q.includes('personal event') ||
+      q.includes('finish my visits') ||
+      q.includes('finish customer visits') ||
+      q.includes('today plan') ||
+      q.includes("today's plan") ||
+      q.includes('route plan') ||
+      q.includes('schedule my visits')
+    ) {
+      return 'schedule'
+    }
 
     if (
       q.includes('tomorrow') ||
@@ -379,6 +421,95 @@ export default function CoachPage({ userId }: CoachPageProps) {
       } else {
         response +=
           '\nNext practical action: choose one high-value customer and make one revenue-focused move.'
+      }
+    }
+
+    return response
+  }
+
+  function buildScheduleAnswer() {
+    const today = todayString()
+    const tomorrow = tomorrowString()
+
+    const todayVisits = visits
+      .filter(v => {
+        if (!v.planned_start) return false
+        return (
+          v.planned_start >= `${today}T00:00:00` &&
+          v.planned_start < `${tomorrow}T00:00:00` &&
+          isPlannedVisit(v)
+        )
+      })
+      .sort((a, b) =>
+        String(a.planned_start || '').localeCompare(String(b.planned_start || ''))
+      )
+
+    const todayEvents = personalEvents
+      .filter(e => e.status !== 'cancelled')
+      .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+
+    const eveningEvent = todayEvents.find(e => {
+      if (e.all_day) return false
+      const start = new Date(e.starts_at)
+      if (Number.isNaN(start.getTime())) return false
+      const hourIST = Number(new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        hour12: false,
+      }).format(start))
+      return hourIST >= 16
+    })
+
+    const formatEventTime = (value: string | null) => {
+      if (!value) return ''
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return ''
+      return date.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    }
+
+    let response = 'YOUR SMART PLAN — TODAY\n\n'
+
+    if (todayVisits.length === 0) {
+      response += 'I cannot see any planned visits for today in the visits schedule. Check that today’s route is saved to FieldOS.\n'
+    } else {
+      response += `You have ${todayVisits.length} planned visit${todayVisits.length === 1 ? '' : 's'} in today’s schedule.\n\n`
+      todayVisits.forEach((visit, index) => {
+        const customer = customers.find(c => c.id === visit.customer_id)
+        response += `${index + 1}. KEEP — ${customerName(visit.customer_id)} at ${formatVisitTime(visit.planned_start)}`
+        if (customer) response += ` (priority ${customer.priority})`
+        if (visit.next_action) response += `\n   Focus: ${visit.next_action}`
+        response += '\n'
+      })
+    }
+
+    if (eveningEvent) {
+      response += `\nPERSONAL COMMITMENT\n${eveningEvent.title} starts at ${formatEventTime(eveningEvent.starts_at)}`
+      if (eveningEvent.ends_at) response += ` and ends at ${formatEventTime(eveningEvent.ends_at)}`
+      if (eveningEvent.location) response += ` · ${eveningEvent.location}`
+      response += '. Protect time to travel home and get ready.\n'
+    } else if (todayEvents.length === 0) {
+      response += '\nI could not find a personal event scheduled for today in My Week. If you have a fixed commitment, confirm it is saved there.\n'
+    }
+
+    const lowEnergy = health?.energy !== null && health?.energy !== undefined && health.energy <= 3
+    if (lowEnergy || health?.day_weight === 'heavy' || health?.home_time_status === 'late') {
+      response += '\nENERGY RULE\nDo not add extra visits today. Keep the planned high-value conversations and avoid unnecessary detours.\n'
+    }
+
+    response += '\nTIME REALITY CHECK\nThe visit times above come from your saved schedule. FieldOS does not currently have confirmed visit durations or live travel estimates here, so it cannot guarantee you will finish by your personal event. Use the gaps between appointments for travel and keep the final visit short and focused.\n'
+
+    if (todayVisits.length >= 3) {
+      const lowestPriorityVisit = todayVisits
+        .map(v => ({ visit: v, customer: customers.find(c => c.id === v.customer_id) }))
+        .sort((a, b) => (b.customer?.priority ?? 999) - (a.customer?.priority ?? 999))[0]
+      if (lowestPriorityVisit?.customer) {
+        response += `\nIF YOU START RUNNING LATE\nCALL ${lowestPriorityVisit.customer.name} first to explain the delay and agree a new time. If a visit must move, RESCHEDULE the lowest-priority visit rather than silently missing it. This is a priority-based fallback, not a guarantee; consider any urgent customer commitment before moving it.`
+      } else {
+        response += '\nIF YOU START RUNNING LATE\nCall the next customer before the appointment time and agree whether to shorten the visit or reschedule it.'
       }
     }
 
@@ -736,6 +867,9 @@ export default function CoachPage({ userId }: CoachPageProps) {
     const intent = getIntent(userQuestion)
 
     switch (intent) {
+      case 'schedule':
+        return buildScheduleAnswer()
+
       case 'tomorrow':
         return buildTomorrowAnswer()
 
@@ -775,6 +909,13 @@ export default function CoachPage({ userId }: CoachPageProps) {
     const context = {
       question_intent: getIntent(trimmed),
       health,
+      personal_events_today: personalEvents.map(event => ({
+        title: event.title,
+        starts_at: event.starts_at,
+        ends_at: event.ends_at,
+        all_day: event.all_day,
+        status: event.status,
+      })),
       today: todayString(),
       tomorrow: tomorrowString(),
       today_visits: visits.filter(v => {
@@ -986,7 +1127,7 @@ export default function CoachPage({ userId }: CoachPageProps) {
         <h3>COACH'S RECOMMENDATION</h3>
 
         <p style={{ whiteSpace: 'pre-line' }}>
-          {answer || buildTodayAnswer()}
+          {answer || buildScheduleAnswer()}
         </p>
       </div>
 
