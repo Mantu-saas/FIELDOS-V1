@@ -859,6 +859,69 @@ export default function CoachPage({ userId }: CoachPageProps) {
     return response
   }
 
+  function buildTimeWindowAnswer() {
+    const today = todayString()
+    const tomorrow = tomorrowString()
+    const todayVisits = visits
+      .filter(v => {
+        if (!v.planned_start) return false
+        return v.planned_start >= `${today}T00:00:00` &&
+          v.planned_start < `${tomorrow}T00:00:00` &&
+          isPlannedVisit(v)
+      })
+      .sort((a, b) => String(a.planned_start || '').localeCompare(String(b.planned_start || '')))
+
+    const eveningEvent = personalEvents
+      .filter(e => e.status !== 'cancelled' && !e.all_day)
+      .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+      .find(e => {
+        const start = new Date(e.starts_at)
+        if (Number.isNaN(start.getTime())) return false
+        const hourIST = Number(new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false,
+        }).format(start))
+        return hourIST >= 16
+      })
+
+    let response = 'YOUR 3 PM–6 PM DECISION\n\n'
+    if (todayVisits.length === 0) {
+      response += 'I cannot see saved visits for today. Save the visits in your schedule before relying on this plan.\n'
+    } else {
+      response += `I found ${todayVisits.length} planned visit(s) in today's saved schedule:\n`
+      todayVisits.forEach((visit, index) => {
+        const customer = customers.find(c => c.id === visit.customer_id)
+        response += `${index + 1}. ${formatVisitTime(visit.planned_start)} — ${customerName(visit.customer_id)}${customer ? ` (priority ${customer.priority})` : ''}\n`
+      })
+    }
+
+    response += '\nREALITY CHECK\nThe appointment start times alone do not prove that all three visits can finish by 6 PM. FieldOS does not have confirmed visit durations or live travel estimates here, so I cannot honestly guarantee you will finish on time.\n'
+
+    const lowestPriorityVisit = todayVisits
+      .map(v => ({ visit: v, customer: customers.find(c => c.id === v.customer_id) }))
+      .filter(item => item.customer)
+      .sort((a, b) => (b.customer?.priority ?? -1) - (a.customer?.priority ?? -1))[0]
+
+    if (todayVisits.length >= 3 && lowestPriorityVisit?.customer) {
+      const firstVisit = todayVisits[0]
+      const secondVisit = todayVisits[1]
+      const thirdVisit = todayVisits[2]
+      response += `\nKEEP / CALL / RESCHEDULE\nKEEP — ${customerName(firstVisit.customer_id)} at ${formatVisitTime(firstVisit.planned_start)} as the first planned visit, if it is still valuable.\n`
+      response += `KEEP IF ON TIME — ${customerName(secondVisit.customer_id)} at ${formatVisitTime(secondVisit.planned_start)} only if the first visit and travel finish in time. If you are running late, CALL ${lowestPriorityVisit.customer.name} before their appointment and agree a new time. This customer has the largest priority number in the saved records (priority ${lowestPriorityVisit.customer.priority}), so this is the priority-based first person to discuss rescheduling—not an automatic rule.\n`
+      response += `KEEP IF YOU CAN FINISH BY 6 PM — ${customerName(thirdVisit.customer_id)} at ${formatVisitTime(thirdVisit.planned_start)}. If the visit cannot fit safely into the remaining time, call ahead and RESCHEDULE rather than rushing or silently missing it.\n`
+    } else {
+      response += '\nIF TIME GETS TIGHT\nCall the next customer before the appointment time and agree whether to shorten the visit or reschedule it.\n'
+    }
+
+    response += '\nPERSONAL COMMITMENT\n'
+    if (eveningEvent) {
+      response += `${eveningEvent.title} starts at ${new Date(eveningEvent.starts_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit' })}. Stop customer visits early enough to travel home and get ready. Do not treat 6 PM as a guaranteed finish time unless travel and visit duration are confirmed.\n`
+    } else {
+      response += 'Protect enough time to travel home and get ready for your 7 PM commitment. Confirm that the event is saved in My Week if you want Coach to display it here.\n'
+    }
+
+    return response
+  }
+
   function buildCoachAnswer(userQuestion?: string) {
     if (!userQuestion) {
       return buildTodayAnswer()
@@ -868,6 +931,16 @@ export default function CoachPage({ userId }: CoachPageProps) {
 
     switch (intent) {
       case 'schedule':
+        if (
+          userQuestion &&
+          (userQuestion.toLowerCase().includes('keep') ||
+            userQuestion.toLowerCase().includes('call') ||
+            userQuestion.toLowerCase().includes('reschedule') ||
+            userQuestion.toLowerCase().includes('finish on time') ||
+            userQuestion.toLowerCase().includes('finish by'))
+        ) {
+          return buildTimeWindowAnswer()
+        }
         return buildScheduleAnswer()
 
       case 'tomorrow':
