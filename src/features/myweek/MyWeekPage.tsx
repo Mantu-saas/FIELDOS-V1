@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
+import { supabase } from '../../lib/supabase'
 import type { Profile } from '../../types'
 import {
-  DAY_NAMES,
+  addDaysStr,
   istDate,
   istToday,
-  weekStartMonday,
-  weekDates,
   formatTimeIST,
   formatDayShort,
   inrText,
@@ -16,6 +15,25 @@ import EventForm from './EventForm'
 
 const cap = (s: string) =>
   s.charAt(0).toUpperCase() + s.slice(1)
+
+const isCompleted = (status: string) =>
+  ['completed', 'complete', 'done'].includes(status.toLowerCase())
+
+type FollowUpRow = {
+  id: string
+  customer_id: string | null
+  due_date: string
+  action: string
+  expected_value: number | null
+  status: string
+  customers?: { name: string } | { name: string }[] | null
+}
+
+function followUpCustomerName(item: FollowUpRow): string {
+  const related = item.customers
+  if (Array.isArray(related)) return related[0]?.name || 'Customer'
+  return related?.name || 'Customer'
+}
 
 function timeLabel(e: PersonalEvent): string {
   if (e.all_day) return 'All day'
@@ -35,6 +53,20 @@ function timeLabel(e: PersonalEvent): string {
       )} ${formatTimeIST(e.ends_at)}`
 }
 
+type WeeklySummary = {
+  salesAmount: number
+  salesCount: number
+  visitsCompleted: number
+  followUpsCompleted: number
+}
+
+const EMPTY_SUMMARY: WeeklySummary = {
+  salesAmount: 0,
+  salesCount: 0,
+  visitsCompleted: 0,
+  followUpsCompleted: 0
+}
+
 export default function MyWeekPage({
   profile,
   onBack
@@ -43,37 +75,158 @@ export default function MyWeekPage({
   onBack: () => void
 }) {
   const [events, setEvents] = useState<PersonalEvent[]>([])
+  const [followUps, setFollowUps] = useState<FollowUpRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [summaryErrors, setSummaryErrors] = useState<string[]>([])
+  const [summary, setSummary] =
+    useState<WeeklySummary>(EMPTY_SUMMARY)
   const [adding, setAdding] = useState(false)
   const [editingEvent, setEditingEvent] =
     useState<PersonalEvent | null>(null)
+  const [savingEventId, setSavingEventId] = useState<string | null>(null)
+  const [savingFollowUpId, setSavingFollowUpId] = useState<string | null>(null)
 
+  // Rolling 7-day window: today plus the next six days.
   const today = istToday()
-  const monday = weekStartMonday(today)
-  const days = weekDates(monday)
+  const weekEnd = addDaysStr(today, 7)
+  const days = Array.from(
+    { length: 7 },
+    (_, index) => addDaysStr(today, index)
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError('')
+    setSummaryErrors([])
 
-    const r = await loadWeekEvents(
-      profile.id,
-      monday
-    )
+    const startStamp = `${today}T00:00:00+05:30`
+    const endStamp = `${weekEnd}T00:00:00+05:30`
 
-    setError(
-      r.error
-        ? 'Could not load your week: ' + r.error
-        : ''
-    )
+    const [eventResult, salesResult, visitsResult, followUpsResult] =
+      await Promise.all([
+        loadWeekEvents(profile.id, today),
 
-    setEvents(r.events)
+        supabase
+          .from('sales')
+          .select('id,amount')
+          .eq('user_id', profile.id)
+          .gte('sale_date', today)
+          .lt('sale_date', weekEnd),
+
+        supabase
+          .from('visits')
+          .select('id,status')
+          .eq('user_id', profile.id)
+          .gte('planned_start', startStamp)
+          .lt('planned_start', endStamp),
+
+        supabase
+          .from('follow_ups')
+          .select('id,customer_id,due_date,action,expected_value,status,customers(name)')
+          .eq('user_id', profile.id)
+          .gte('due_date', today)
+          .lt('due_date', weekEnd)
+          .order('due_date', { ascending: true })
+      ])
+
+    setEvents(eventResult.events)
+
+    const errors: string[] = []
+
+    if (eventResult.error) {
+      errors.push('Personal events: ' + eventResult.error)
+    }
+    if (salesResult.error) {
+      errors.push('Sales summary: ' + salesResult.error.message)
+    }
+    if (visitsResult.error) {
+      errors.push('Visits summary: ' + visitsResult.error.message)
+    }
+    if (followUpsResult.error) {
+      errors.push('Follow-ups summary: ' + followUpsResult.error.message)
+    }
+
+    const sales = (salesResult.data ?? []) as {
+      id: string
+      amount: number | null
+    }[]
+
+    const visits = (visitsResult.data ?? []) as {
+      id: string
+      status: string
+    }[]
+
+    const loadedFollowUps = (followUpsResult.data ?? []) as FollowUpRow[]
+    setFollowUps(loadedFollowUps)
+
+    setSummary({
+      salesAmount: sales.reduce(
+        (total, sale) => total + Number(sale.amount ?? 0),
+        0
+      ),
+      salesCount: sales.length,
+      visitsCompleted: visits.filter(
+        visit => visit.status === 'visited'
+      ).length,
+      followUpsCompleted: loadedFollowUps.filter(
+        item => isCompleted(item.status)
+      ).length
+    })
+
+    setSummaryErrors(errors)
     setLoading(false)
-  }, [profile.id, monday])
+  }, [profile.id, today, weekEnd])
 
   useEffect(() => {
     load()
   }, [load])
+
+  async function changeEventStatus(
+    event: PersonalEvent,
+    nextStatus: 'planned' | 'completed'
+  ) {
+    setError('')
+    setSavingEventId(event.id)
+
+    const { error: updateError } = await supabase
+      .from('personal_events')
+      .update({ status: nextStatus })
+      .eq('id', event.id)
+      .eq('user_id', profile.id)
+
+    if (updateError) {
+      setError(
+        'Could not update this event: ' + updateError.message
+      )
+      setSavingEventId(null)
+      return
+    }
+
+    await load()
+    setSavingEventId(null)
+  }
+
+  async function changeFollowUpStatus(item: FollowUpRow) {
+    setError('')
+    setSavingFollowUpId(item.id)
+
+    const nextStatus = isCompleted(item.status) ? 'open' : 'done'
+    const { error: updateError } = await supabase
+      .from('follow_ups')
+      .update({ status: nextStatus })
+      .eq('id', item.id)
+      .eq('user_id', profile.id)
+
+    if (updateError) {
+      setError('Could not update this follow-up: ' + updateError.message)
+      setSavingFollowUpId(null)
+      return
+    }
+
+    await load()
+    setSavingFollowUpId(null)
+  }
 
   if (adding || editingEvent) {
     return (
@@ -81,9 +234,7 @@ export default function MyWeekPage({
         profile={profile}
         defaultDate={
           editingEvent
-            ? istDate(
-                new Date(editingEvent.starts_at)
-              )
+            ? istDate(new Date(editingEvent.starts_at))
             : today
         }
         event={editingEvent}
@@ -112,12 +263,13 @@ export default function MyWeekPage({
 
       <div className="card">
         <h2>My Week</h2>
-
         <p className="small">
-          {formatDayShort(days[0])} –{' '}
-          {formatDayShort(days[6])} (India time)
+          Today + the next 6 days · India time
         </p>
-
+        <p className="small">
+          Your planner moves forward automatically each day. Follow-ups appear
+          on their due date below your personal events.
+        </p>
         <button
           className="primary"
           onClick={() => setAdding(true)}
@@ -126,23 +278,73 @@ export default function MyWeekPage({
         </button>
       </div>
 
-      {error && (
-        <p className="msg">
-          {error}
+      <div className="card">
+        <h3>Progress highlights</h3>
+        <p className="small">
+          {formatDayShort(today)} – {formatDayShort(days[6])}
         </p>
-      )}
+
+        {loading ? (
+          <p className="small">Calculating from saved records…</p>
+        ) : (
+          <>
+            <div className="line">
+              <span>Sales recorded</span>
+              <b>{inrText(summary.salesAmount)}</b>
+            </div>
+            <div className="line">
+              <span>Sales records</span>
+              <b>{summary.salesCount}</b>
+            </div>
+            <div className="line">
+              <span>Visits completed</span>
+              <b>{summary.visitsCompleted}</b>
+            </div>
+            <div className="line">
+              <span>Follow-ups completed</span>
+              <b>{summary.followUpsCompleted}</b>
+            </div>
+            <p className="small">
+              Sales use sale date; visits use planned visit date;
+              follow-ups use due date. Counts cover this rolling
+              seven-day period.
+            </p>
+          </>
+        )}
+      </div>
+
+      {error && <p className="msg">{error}</p>}
+
+      {summaryErrors.map((message, index) => (
+        <p className="msg" key={`${index}-${message}`}>
+          {message}
+        </p>
+      ))}
 
       {loading ? (
         <div className="card">
-          <p>Loading…</p>
+          <p>Loading your events and progress…</p>
         </div>
       ) : (
-        days.map((date, i) => {
+        days.map(date => {
           const list = events.filter(
-            e =>
-              istDate(new Date(e.starts_at)) ===
-              date
+            event =>
+              istDate(new Date(event.starts_at)) === date
           )
+
+          // Follow-ups are displayed from follow_ups directly; no duplicate
+          // personal_events rows are created. Dropped follow-ups stay hidden.
+          const dayFollowUps = followUps.filter(
+            item =>
+              item.due_date === date &&
+              !['dropped', 'cancelled'].includes(item.status.toLowerCase())
+          )
+
+          const completedCount =
+            list.filter(event => isCompleted(event.status)).length +
+            dayFollowUps.filter(item => isCompleted(item.status)).length
+          const totalCount = list.length + dayFollowUps.length
+          const plannedCount = totalCount - completedCount
 
           const isToday = date === today
 
@@ -152,107 +354,176 @@ export default function MyWeekPage({
               className="card"
               style={
                 isToday
-                  ? {
-                      borderLeft:
-                        '4px solid #059669'
-                    }
+                  ? { borderLeft: '4px solid #059669' }
                   : undefined
               }
             >
               <p>
-                <b>{DAY_NAMES[i]}</b>{' '}
+                <b>{formatDayShort(date)}</b>{' '}
                 <span className="small">
-                  {formatDayShort(date)}
-                  {isToday
-                    ? ' · Today'
-                    : ''}
+                  {isToday ? '· Today' : ''}
                 </span>
               </p>
 
-              {list.length === 0 ? (
-                <p className="small">
-                  No events
-                </p>
-              ) : (
-                list.map(e => (
+              <p className="small">
+                {totalCount === 0
+                  ? 'No events or follow-ups planned'
+                  : `${completedCount} completed · ${plannedCount} remaining`}
+              </p>
+
+              {totalCount > 0 && (
+                <div
+                  style={{
+                    height: '6px',
+                    background: '#e5e7eb',
+                    borderRadius: '999px',
+                    overflow: 'hidden',
+                    marginBottom: '12px'
+                  }}
+                >
                   <div
-                    key={e.id}
+                    style={{
+                      height: '100%',
+                      width: `${completedCount / totalCount * 100}%`,
+                      background: '#059669',
+                      borderRadius: '999px'
+                    }}
+                  />
+                </div>
+              )}
+
+              {list.map(event => {
+                const completed = isCompleted(event.status)
+                const cancelled = event.status === 'cancelled'
+
+                return (
+                  <div
+                    key={event.id}
                     className="line"
                     style={{
-                      alignItems:
-                        'flex-start',
+                      alignItems: 'flex-start',
                       gap: '12px'
                     }}
                   >
-                    <span
-                      style={{
-                        flex: 1
-                      }}
-                    >
+                    <span style={{ flex: 1, minWidth: 0 }}>
                       <b
                         style={
-                          e.status ===
-                          'cancelled'
-                            ? {
-                                textDecoration:
-                                  'line-through'
-                              }
+                          completed || cancelled
+                            ? { textDecoration: 'line-through' }
                             : undefined
                         }
                       >
-                        {e.title}
+                        {event.title}
                       </b>
 
                       <br />
 
                       <span className="small">
-                        {cap(e.category)} ·{' '}
-                        {cap(e.priority)}{' '}
-                        priority ·{' '}
-                        {cap(e.status)}
-                        {e.location
-                          ? ' · ' +
-                            e.location
-                          : ''}
+                        {cap(event.category)} ·{' '}
+                        {cap(event.priority)} priority ·{' '}
+                        {cap(event.status)}
+                        {event.location ? ' · ' + event.location : ''}
                       </span>
 
-                      {e.amount !== null && (
+                      {event.amount !== null && (
                         <>
                           <br />
-                          <b>
-                            {inrText(
-                              e.amount
-                            )}
-                          </b>
+                          <b>{inrText(event.amount)}</b>
                         </>
+                      )}
+
+                      <br />
+
+                      {!cancelled && (
+                        <button
+                          className="link"
+                          disabled={savingEventId === event.id}
+                          onClick={() =>
+                            changeEventStatus(
+                              event,
+                              completed ? 'planned' : 'completed'
+                            )
+                          }
+                        >
+                          {savingEventId === event.id
+                            ? 'Saving…'
+                            : completed
+                              ? 'Mark as planned'
+                              : '✓ Mark completed'}
+                        </button>
                       )}
                     </span>
 
                     <span
                       style={{
-                        textAlign:
-                          'right',
+                        textAlign: 'right',
                         flexShrink: 0
                       }}
                     >
                       <span className="small">
-                        {timeLabel(e)}
+                        {timeLabel(event)}
                       </span>
-
                       <br />
-
                       <button
                         className="link"
-                        onClick={() =>
-                          setEditingEvent(e)
-                        }
+                        onClick={() => setEditingEvent(event)}
                       >
                         Edit
                       </button>
                     </span>
                   </div>
-                ))
-              )}
+                )
+              })}
+
+              {dayFollowUps.map(item => {
+                const completed = isCompleted(item.status)
+                const customerName = followUpCustomerName(item)
+
+                return (
+                  <div
+                    key={`follow-up-${item.id}`}
+                    className="line"
+                    style={{
+                      alignItems: 'flex-start',
+                      gap: '12px',
+                      borderTop: '1px solid #e5e7eb',
+                      paddingTop: '10px',
+                      marginTop: '10px'
+                    }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <b style={completed ? { textDecoration: 'line-through' } : undefined}>
+                        Follow-up: {customerName}
+                      </b>
+                      <br />
+                      <span className="small">Customer follow-up · {cap(item.status)}</span>
+                      <br />
+                      <span>{item.action}</span>
+                      {item.expected_value !== null && Number(item.expected_value) > 0 && (
+                        <>
+                          <br />
+                          <b>{inrText(Number(item.expected_value))}</b>
+                        </>
+                      )}
+                      <br />
+                      <button
+                        className="link"
+                        disabled={savingFollowUpId === item.id}
+                        onClick={() => changeFollowUpStatus(item)}
+                      >
+                        {savingFollowUpId === item.id
+                          ? 'Saving…'
+                          : completed
+                            ? 'Mark as open'
+                            : '✓ Mark follow-up completed'}
+                      </button>
+                    </span>
+                    <span style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <span className="small">Due date</span>
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           )
         })
