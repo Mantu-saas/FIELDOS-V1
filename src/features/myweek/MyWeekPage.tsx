@@ -53,6 +53,22 @@ function timeLabel(e: PersonalEvent): string {
       )} ${formatTimeIST(e.ends_at)}`
 }
 
+// A customer visit shown in the planner (read-only here; visits are managed in ROUTE)
+type WeekVisit = {
+  id: string
+  customer_id: string
+  status: string
+  planned_start: string
+  notes: string | null
+  customers?: { name: string } | { name: string }[] | null
+}
+
+function visitCustomerName(item: WeekVisit): string {
+  const related = item.customers
+  if (Array.isArray(related)) return related[0]?.name || 'Customer'
+  return related?.name || 'Customer'
+}
+
 type WeeklySummary = {
   salesAmount: number
   salesCount: number
@@ -76,6 +92,7 @@ export default function MyWeekPage({
 }) {
   const [events, setEvents] = useState<PersonalEvent[]>([])
   const [followUps, setFollowUps] = useState<FollowUpRow[]>([])
+  const [plannedVisits, setPlannedVisits] = useState<WeekVisit[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [summaryErrors, setSummaryErrors] = useState<string[]>([])
@@ -116,7 +133,7 @@ export default function MyWeekPage({
 
         supabase
           .from('visits')
-          .select('id,status')
+          .select('id,customer_id,status,planned_start,notes,customers(name)')
           .eq('user_id', profile.id)
           .gte('planned_start', startStamp)
           .lt('planned_start', endStamp),
@@ -152,10 +169,8 @@ export default function MyWeekPage({
       amount: number | null
     }[]
 
-    const visits = (visitsResult.data ?? []) as {
-      id: string
-      status: string
-    }[]
+    const visits = (visitsResult.data ?? []) as unknown as WeekVisit[]
+    setPlannedVisits(visits.filter(visit => visit.status === 'planned'))
 
     const loadedFollowUps = (followUpsResult.data ?? []) as FollowUpRow[]
     setFollowUps(loadedFollowUps)
@@ -340,10 +355,15 @@ export default function MyWeekPage({
               !['dropped', 'cancelled'].includes(item.status.toLowerCase())
           )
 
+          // Planned customer visits for this day (including rescheduled ones), by time
+          const dayVisits = plannedVisits
+            .filter(visit => istDate(new Date(visit.planned_start)) === date)
+            .sort((a, b) => new Date(a.planned_start).getTime() - new Date(b.planned_start).getTime())
+
           const completedCount =
             list.filter(event => isCompleted(event.status)).length +
             dayFollowUps.filter(item => isCompleted(item.status)).length
-          const totalCount = list.length + dayFollowUps.length
+          const totalCount = list.length + dayFollowUps.length + dayVisits.length
           const plannedCount = totalCount - completedCount
 
           const isToday = date === today
@@ -367,7 +387,7 @@ export default function MyWeekPage({
 
               <p className="small">
                 {totalCount === 0
-                  ? 'No events or follow-ups planned'
+                  ? 'No events, visits or follow-ups planned'
                   : `${completedCount} completed · ${plannedCount} remaining`}
               </p>
 
@@ -474,6 +494,35 @@ export default function MyWeekPage({
                   </div>
                 )
               })}
+
+              {dayVisits.map(visit => (
+                <div
+                  key={`visit-${visit.id}`}
+                  className="line"
+                  style={{
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                    borderTop: '1px solid #e5e7eb',
+                    paddingTop: '10px',
+                    marginTop: '10px'
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <b>Visit: {visitCustomerName(visit)}</b>
+                    <br />
+                    <span className="small">Customer visit · To visit</span>
+                    {visit.notes && (
+                      <>
+                        <br />
+                        <span className="small">{visit.notes}</span>
+                      </>
+                    )}
+                  </span>
+                  <span style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <span className="small">{formatTimeIST(visit.planned_start)}</span>
+                  </span>
+                </div>
+              ))}
 
               {dayFollowUps.map(item => {
                 const completed = isCompleted(item.status)
