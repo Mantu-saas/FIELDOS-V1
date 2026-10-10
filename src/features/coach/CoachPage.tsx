@@ -78,6 +78,7 @@ type CoachIntent =
   | 'performance'
   | 'improve_performance'
   | 'today'
+  | 'visit_status'
   | 'unknown'
 
 /* ------------------------------------------------------------------ */
@@ -530,6 +531,21 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       return 'improve_performance'
     }
 
+    // 1c. Today's visit STATUS: "which visits are pending / completed / unavailable / rescheduled".
+    //     Needs a visit word AND a visit-state word, and must not mention another topic
+    //     (target, sales, follow-ups, performance review, improving, tomorrow, travel/route,
+    //     hours available, energy/workload).
+    //     It sits before the target and follow-up rules so that words like "pending" and
+    //     "remaining" in a VISIT question are not mistaken for follow-ups or the monthly target.
+    if (
+      (/\bvisits?\b|\bvisited\b|\bstops?\b/.test(q) ||
+        /\b(customers?|clients?)\b.{0,20}\b(pending|left|remaining|outstanding|yet)\b/.test(q)) &&
+      /\b(pending|left|remaining|outstanding|yet to|not yet|not visited|unvisited|completed|finished|unavailable|not available|rescheduled)\b/.test(q) &&
+      !/\b(target|quota|sales?|follow ?-?ups?|followups?|how (did|was|has|have)|improv\w*|perform\w*|results?|tomorrow|tmrw|tmr|next day|next-day|travel\w*|routes?|driv\w*|distance|petrol|fuel|nearby|nearest|closest|sequence|hours?|hrs?|tired|energy|stress\w*|busy|heavy|too many|too much|overload\w*)\b/.test(q)
+    ) {
+      return 'visit_status'
+    }
+
     // 2. Sales / target
     if (
       /\b(target|quota|behind|achieve\w*|remaining|shortfall|on track|pace)\b/.test(q) ||
@@ -916,6 +932,101 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     if (first) {
       r += `\n\nFirst visit: ${customerName(first.customer_id)} at ${visitClock(first)}.`
       if (first.next_action) r += ` Prepare: ${first.next_action}.`
+    }
+    return r
+  }
+
+  // Today's visits grouped by their SAVED status (read-only; uses snapshot() only):
+  //   planned     -> pending (split into "still ahead" and "time passed, not recorded yet")
+  //   visited     -> completed
+  //   unavailable -> neither completed nor pending
+  //   rescheduled -> moved to another day, NOT pending today
+  //   cancelled   -> neither completed nor pending
+  function buildVisitStatusAnswer(q: string) {
+    const s = snapshot()
+    const all = s.todayAll
+
+    if (all.length === 0) {
+      return "TODAY'S VISITS\n\nNo visits are on today's route yet. Add stops in the ROUTE tab and I will track them here."
+    }
+
+    const pending = all.filter(v => v.status === 'planned')
+    const ahead = pending.filter(v => visitMinutes(v) >= s.nowMins - 15)
+    const passed = pending.filter(v => visitMinutes(v) < s.nowMins - 15)
+    const visited = all.filter(v => v.status === 'visited')
+    const unavailable = all.filter(v => v.status === 'unavailable')
+    const rescheduled = all.filter(v => v.status === 'rescheduled')
+    const cancelled = all.filter(v => v.status === 'cancelled')
+    const other = all.filter(
+      v => !['planned', 'visited', 'unavailable', 'rescheduled', 'cancelled'].includes(v.status)
+    )
+
+    const sale = (v: Visit) => (Number(v.sale_amount) > 0 ? ` — Sale ${inr(Number(v.sale_amount))}` : '')
+    const line = (v: Visit) => `• ${customerName(v.customer_id)}`
+    const section = (title: string, rows: string[]) =>
+      `${title} (${rows.length})\n` + (rows.length > 0 ? rows.join('\n') : 'None') + '\n\n'
+
+    const sections = {
+      pending:
+        section('PENDING', [
+          ...ahead.map(v => `${line(v)} — planned ${visitClock(v)}`),
+          ...passed.map(v => `${line(v)} — planned ${visitClock(v)} (time has passed, not recorded yet)`),
+        ]),
+      visited: section('VISITED', visited.map(v => `${line(v)}${sale(v)}`)),
+      unavailable: section(
+        'UNAVAILABLE — not counted as completed or pending',
+        unavailable.map(v => line(v))
+      ),
+      rescheduled: section(
+        'RESCHEDULED — moved to another day, not pending today',
+        rescheduled.map(v => line(v))
+      ),
+    }
+
+    // Lead with the status the user asked about; pending is the default
+    const asksUnavailable = /\b(unavailable|not available)\b/.test(q)
+    const asksRescheduled = /\brescheduled\b/.test(q)
+    const asksPending = /\b(pending|left|remaining|outstanding|yet to|not yet|not visited|unvisited)\b/.test(q)
+    const asksDone = !asksPending && /\b(completed|finished|visited)\b/.test(q)
+
+    let lead = 'pending'
+    if (asksUnavailable) lead = 'unavailable'
+    else if (asksRescheduled) lead = 'rescheduled'
+    else if (asksDone) lead = 'visited'
+
+    let r = "TODAY'S VISITS\n\n"
+    if (lead === 'pending') {
+      r += pending.length === 0
+        ? 'No customer visits are still pending today.\n\n'
+        : `${pending.length} customer visit${pending.length === 1 ? ' is' : 's are'} still pending today.\n\n`
+    }
+    r += `Pending: ${pending.length} · Visited: ${visited.length} · Unavailable: ${unavailable.length} · Rescheduled: ${rescheduled.length}`
+    if (cancelled.length > 0) r += ` · Cancelled: ${cancelled.length}`
+    r += '\n\n'
+
+    const order: (keyof typeof sections)[] = [lead as keyof typeof sections]
+    for (const key of ['pending', 'visited', 'unavailable', 'rescheduled'] as const) {
+      if (!order.includes(key)) order.push(key)
+    }
+    for (const key of order) {
+      // Always show the section asked about and pending; show the others only when they have visits
+      const count = { pending: pending.length, visited: visited.length, unavailable: unavailable.length, rescheduled: rescheduled.length }[key]
+      if (key === lead || key === 'pending' || count > 0) r += sections[key]
+    }
+
+    if (cancelled.length > 0) {
+      r += section('CANCELLED — not counted as completed or pending', cancelled.map(v => line(v)))
+    }
+    if (other.length > 0) {
+      r += section('OTHER STATUS', other.map(v => `${line(v)} — ${v.status}`))
+    }
+
+    if (ahead[0]) {
+      r += `Next: ${customerName(ahead[0].customer_id)} at ${visitClock(ahead[0])}.`
+    } else if (passed.length > 0) {
+      r += 'Open the ROUTE tab and record the outcome of the visits whose time has passed.'
+    } else {
+      r += "Nothing is left on today's route."
     }
     return r
   }
@@ -1359,6 +1470,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       case 'workload': return buildWorkloadAnswer(q)
       case 'customers': return buildCustomerAnswer(q)
       case 'followups': return buildFollowUpAnswer(q)
+      case 'visit_status': return buildVisitStatusAnswer(q)
       case 'target': return buildTargetAnswer(q)
       case 'route': return buildRouteAnswer(q)
       case 'health': return buildHealthAnswer()
