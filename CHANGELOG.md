@@ -12,3 +12,9 @@
 
 ## 2026-10-02 - Milestone 1 (Database), written, NOT yet run
 - Added migrations 001 schema, 002 RLS, 003 delete_my_account, RLS isolation test, optional seed, SETUP.md.
+## 2026-10-10 - Fix 5: Visit status clarity (build and browser tests pending)
+
+- Added a Coach answer that separates pending, visited, unavailable, rescheduled and cancelled visits.
+- Rescheduled visits are not counted as pending for today.
+- Preserved the existing Coach answer and loading-state handling.
+- Verification status: NOT YET VERIFIED. Run `npm run build` and test the visit-status questions in the browser before merging.
