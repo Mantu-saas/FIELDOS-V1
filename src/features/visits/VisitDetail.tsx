@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
+import RescheduleVisit from './RescheduleVisit'
 
 type Pre = {
   potential: number; priority: number
@@ -114,6 +115,9 @@ export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId
           {visit.next_action && <p><b>Next action:</b> {visit.next_action}</p>}
           {visit.follow_up_date && <p><b>Follow-up date:</b> {visit.follow_up_date}</p>}
           <p className="small">A recorded visit cannot be edited here. If something is wrong, fix the sale in SALES or the follow-up in Follow-ups.</p>
+          {(visit.status === 'unavailable' || visit.status === 'cancelled') && (
+            <RescheduleVisit userId={userId} visit={visit} onDone={onSaved} />
+          )}
         </div>
       ) : (
         <div className="card">
