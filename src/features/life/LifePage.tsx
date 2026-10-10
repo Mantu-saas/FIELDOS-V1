@@ -122,7 +122,7 @@ export default function LifePage({
 
 
                 {message && (
-          <p className={message.startsWith('Could not save:') ? 'msg error' : 'msg'}>
+          <p style={{ color: message.startsWith('Could not save:') ? '#b91c1c' : '#059669', fontWeight: 500 }}>
             {message}
           </p>
         )}
