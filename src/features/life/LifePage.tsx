@@ -120,11 +120,12 @@ export default function LifePage({
           />
         </label>
 
-        {{message && (
-  <p className={message.startsWith('Could not save:') ? 'msg error' : 'msg'}>
-    {message}
-  </p>
-)}
+
+                {message && (
+          <p className={message.startsWith('Could not save:') ? 'msg error' : 'msg'}>
+            {message}
+          </p>
+        )}
 
         <button
           className="primary"
