@@ -25,6 +25,13 @@ test('COACH and TODAY use the shared target maths and sales rule', () => {
   }
 })
 
+test('C12: COACH target answer uses the shared next-move rules with today\'s planned visits', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  assert.match(src, /buildNextMove\(\{/)
+  assert.match(src, /plannedTodayIds: new Set\(s\.todayPlanned\.map/)
+  assert.doesNotMatch(src, /These three carry/)
+})
+
 test('COACH no longer treats energy 3 (Fresh) as low or shows energy out of 10', () => {
   const src = read('src/features/coach/CoachPage.tsx')
   assert.doesNotMatch(src, /energy\s*<=\s*3/)
