@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Profile } from '../../types'
 import { inr, monthStart, todayIST } from '../../lib/format'
+import { computeTarget } from '../../lib/targetMath'
+import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit } from '../../lib/rules'
 
 type CoachPageProps = {
   userId: string
@@ -96,24 +98,7 @@ function addDays(date: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
 }
 
-function monthEnd(date: string): string {
-  const [y, m] = date.split('-').map(Number)
-  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
-}
-
-// Counts Monday–Saturday days from `from` to `to`, both inclusive.
-function sellingDays(from: string, to: string): number {
-  let count = 0
-  let cursor = from
-  let guard = 0
-  while (cursor <= to && guard < 40) {
-    const dow = new Date(cursor + 'T00:00:00Z').getUTCDay()
-    if (dow !== 0) count += 1
-    cursor = addDays(cursor, 1)
-    guard += 1
-  }
-  return count
-}
+// Selling-day and target maths now come from lib/targetMath.ts (shared with TODAY).
 
 function istDate(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -157,8 +142,9 @@ function parseClock(t: string | null | undefined): number | null {
   return Number(m[1]) * 60 + Number(m[2])
 }
 
+// A rescheduled visit has moved to another day, so it is NOT still planned for this day.
 function isPlannedVisit(visit: Visit) {
-  return visit.status === 'planned' || visit.status === 'rescheduled'
+  return isPendingVisit(visit)
 }
 
 function listNames(names: string[]): string {
@@ -432,18 +418,19 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
         .filter(e => e.status !== 'cancelled' && istDate(e.starts_at) === day)
         .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
 
-    const validSales = sales.filter(s => s.status !== 'cancelled')
-    const mtd = validSales.reduce((sum, s) => sum + Number(s.amount || 0), 0)
-    const todaySales = validSales
-      .filter(s => s.sale_date === today)
-      .reduce((sum, s) => sum + Number(s.amount || 0), 0)
+    // Same rules and same target maths as TODAY (lib/rules.ts, lib/targetMath.ts)
+    const mtd = activeSalesTotal(sales)
+    const todaySales = activeSalesTotal(sales.filter(s => s.sale_date === today))
 
     const target = Number(profile?.monthly_target || 0)
-    const remaining = Math.max(target - mtd, 0)
-    const daysLeft = sellingDays(today, monthEnd(today))
-    const daysElapsed = sellingDays(monthStart(today), today)
-    const required = remaining / Math.max(daysLeft, 1)
-    const avg = mtd / Math.max(daysElapsed, 1)
+    const t = computeTarget({ target, today, salesBeforeToday: mtd - todaySales, salesToday: todaySales })
+    const remaining = t.remaining
+    const daysLeft = t.remainingDays      // selling days left, including today
+    const daysElapsed = t.elapsedDays     // completed selling days before today
+    const required = t.required
+    const avg = t.current                 // average per completed selling day
+    // On the first selling day of the month there is no average yet, so pace cannot be judged
+    const paceKnown = daysElapsed > 0
 
     const homeMins = parseClock(profile?.preferred_home_time)
     const minsToHome = homeMins !== null && homeMins > nowMins ? homeMins - nowMins : null
@@ -453,22 +440,22 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     const heavyDay =
       health?.day_weight === 'heavy' ||
       health?.home_time_status === 'late' ||
-      (energy !== null && energy <= 3)
+      isLowEnergy(energy)
 
     return {
       today, tomorrow, nowMins,
       todayAll, tomorrowAll, todayPlanned, tomorrowPlanned, todayDone, todayUpcoming, todayPassed,
       overdue, dueToday, dueTomorrow, dueLater, open,
       eventsOn,
-      mtd, todaySales, target, remaining, daysLeft, daysElapsed, required, avg,
+      mtd, todaySales, target, remaining, daysLeft, daysElapsed, required, avg, paceKnown,
       homeMins, minsToHome,
       energy, stress, heavyDay,
     }
   }
 
   function energyNote(s: ReturnType<typeof snapshot>): string {
-    if (s.energy !== null && s.energy <= 3) {
-      return `\nENERGY CHECK\nYour check-in shows energy ${s.energy}/10. Keep to the top two actions and turn the rest into calls.\n`
+    if (isLowEnergy(s.energy)) {
+      return `\nENERGY CHECK\nYour check-in shows energy: ${energyLabel(s.energy)}. Keep to the top two actions and turn the rest into calls.\n`
     }
     if (s.stress !== null && s.stress >= 8) {
       return `\nSTRESS CHECK\nYour check-in shows stress ${s.stress}/10. Do the most valuable action first and avoid adding new work.\n`
@@ -750,7 +737,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       r += `\nLOOSE ENDS\n${listNames(s.todayPassed.map(v => customerName(v.customer_id)))} ${s.todayPassed.length === 1 ? 'was' : 'were'} planned earlier but no result is recorded. Record the outcome or reschedule so tomorrow starts clean.\n`
     }
 
-    if (s.target > 0 && s.remaining > 0 && s.avg < s.required) {
+    if (s.target > 0 && s.remaining > 0 && s.paceKnown && s.avg < s.required) {
       r += `\nTARGET\n${inr(s.remaining)} is left over ${s.daysLeft} selling day${s.daysLeft === 1 ? '' : 's'}: ${inr(s.required)} a day needed against ${inr(s.avg)} a day so far.\n`
     }
 
@@ -1218,12 +1205,15 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     }
 
     r += `Needed per day: ${inr(s.required)}\n`
-    r += `Your average so far: ${inr(s.avg)} per day\n`
-
-    const behind = s.avg < s.required
-    r += behind
-      ? `\nYou are behind pace by about ${inr(s.required - s.avg)} a day.\n`
-      : '\nYou are on pace at your current daily average.\n'
+    const behind = s.paceKnown && s.avg < s.required
+    if (s.paceKnown) {
+      r += `Your average so far: ${inr(s.avg)} per completed selling day\n`
+      r += behind
+        ? `\nYou are behind pace by about ${inr(s.required - s.avg)} a day.\n`
+        : '\nYou are on pace at your current daily average.\n'
+    } else {
+      r += '\nNo selling day of this month is complete yet, so there is no average to compare against.\n'
+    }
 
     // Due or overdue items first, then the rest; within each group, highest value first
     const withValue = s.open
@@ -1272,7 +1262,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       return r + 'No health check-in is saved for today. Complete it in the HEALTH tab and I will adjust today\'s plan to it.'
     }
 
-    r += `Energy ${s.energy ?? '—'}/10 · Stress ${s.stress ?? '—'}/10 · Sleep ${health.sleep_hours ?? '—'} hours`
+    r += `Energy: ${energyLabel(s.energy)} · Stress ${s.stress ?? '—'}/10 · Sleep ${health.sleep_hours ?? '—'} hours`
     if (health.day_weight) r += ` · Day: ${health.day_weight}`
     if (health.home_time_status) r += ` · Home time: ${health.home_time_status}`
     r += '\n'
@@ -1290,7 +1280,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     }
 
     r += '\nWHAT TO DO\n'
-    if (s.energy !== null && s.energy <= 3) {
+    if (isLowEnergy(s.energy)) {
       r += 'Energy is low. Keep only the highest-priority visit and the most valuable follow-up call. Move or call the rest.\n'
     } else if (s.stress !== null && s.stress >= 8) {
       r += 'Stress is high. Pick one valuable action, finish it, then decide the next. Avoid adding new commitments today.\n'
@@ -1372,7 +1362,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     r += `Visits completed: ${s.todayDone.length}\n`
     r += `Still planned: ${s.todayUpcoming.length}\n`
     if (s.todayPassed.length > 0) r += `Planned but no result recorded: ${s.todayPassed.length}\n`
-    if (cancelled > 0) r += `Cancelled or unavailable: ${cancelled}\n`
+    if (cancelled > 0) r += `Cancelled, unavailable or rescheduled: ${cancelled}\n`
     r += `Sales recorded today: ${inr(s.todaySales)}\n`
     if (s.target > 0) r += `Month so far: ${inr(s.mtd)} of ${inr(s.target)} (${inr(s.remaining)} left)\n`
 
@@ -1400,7 +1390,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
         Number(b.expected_value || 0) - Number(a.expected_value || 0) ||
         a.due_date.localeCompare(b.due_date)
     )
-    const behind = s.target > 0 && s.remaining > 0 && s.avg < s.required
+    const behind = s.target > 0 && s.remaining > 0 && s.paceKnown && s.avg < s.required
 
     let r = 'IMPROVE YOUR PERFORMANCE\n\n'
     r += 'WHAT YOUR SAVED DATA SHOWS\n'
@@ -1411,7 +1401,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     if (s.target > 0) {
       r += `Month: ${inr(s.mtd)} of ${inr(s.target)} from ${monthSalesCount} recorded sale${monthSalesCount === 1 ? '' : 's'}`
       if (s.remaining > 0) {
-        r += `; ${inr(s.remaining)} left over ${s.daysLeft} selling day${s.daysLeft === 1 ? '' : 's'} (${inr(s.required)} a day needed, ${inr(s.avg)} a day so far)`
+        r += `; ${inr(s.remaining)} left over ${s.daysLeft} selling day${s.daysLeft === 1 ? '' : 's'} (${inr(s.required)} a day needed${s.paceKnown ? `, ${inr(s.avg)} a day so far` : ''})`
       } else {
         r += '; target reached'
       }
@@ -1421,7 +1411,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     }
     if (health) {
       const bits: string[] = []
-      if (s.energy !== null) bits.push(`energy ${s.energy}/10`)
+      if (s.energy !== null) bits.push(`energy ${energyLabel(s.energy)}`)
       if (s.stress !== null) bits.push(`stress ${s.stress}/10`)
       r += bits.length > 0 ? `Check-in today: ${bits.join(', ')}.\n` : 'Check-in today is saved but has no energy or stress score.\n'
     } else {
@@ -1594,7 +1584,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
         {health ? (
           <>
-            <p>Energy: <strong>{health.energy ?? '—'}/10</strong></p>
+            <p>Energy: <strong>{energyLabel(health.energy)}</strong></p>
             <p>Stress: <strong>{health.stress ?? '—'}/10</strong></p>
             <p>Sleep: <strong>{health.sleep_hours ?? '—'} hours</strong></p>
             <p>Day weight: <strong>{health.day_weight ?? '—'}</strong></p>

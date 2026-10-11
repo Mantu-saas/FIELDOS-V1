@@ -11,6 +11,7 @@ import {
   loadWeekEvents,
   type PersonalEvent
 } from '../../lib/personalEvents'
+import { activeSales, activeSalesTotal } from '../../lib/rules'
 import EventForm from './EventForm'
 
 const cap = (s: string) =>
@@ -126,7 +127,7 @@ export default function MyWeekPage({
 
         supabase
           .from('sales')
-          .select('id,amount')
+          .select('id,amount,status')
           .eq('user_id', profile.id)
           .gte('sale_date', today)
           .lt('sale_date', weekEnd),
@@ -167,6 +168,7 @@ export default function MyWeekPage({
     const sales = (salesResult.data ?? []) as {
       id: string
       amount: number | null
+      status: string | null
     }[]
 
     const visits = (visitsResult.data ?? []) as unknown as WeekVisit[]
@@ -176,11 +178,9 @@ export default function MyWeekPage({
     setFollowUps(loadedFollowUps)
 
     setSummary({
-      salesAmount: sales.reduce(
-        (total, sale) => total + Number(sale.amount ?? 0),
-        0
-      ),
-      salesCount: sales.length,
+      // Cancelled sales stay in history but never count (shared rule in lib/rules.ts)
+      salesAmount: activeSalesTotal(sales),
+      salesCount: activeSales(sales).length,
       visitsCompleted: visits.filter(
         visit => visit.status === 'visited'
       ).length,

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, monthStart } from '../../lib/format'
 import { computeTarget } from '../../lib/targetMath'
+import { activeSalesTotal } from '../../lib/rules'
 import { isToday, loadWeekEvents, weekStartMonday } from '../../lib/personalEvents'
 import type { PersonalEvent } from '../../lib/personalEvents'
 import type { Profile } from '../../types'
@@ -83,15 +84,9 @@ export default function TodayPage({ profile }: { profile: Profile }) {
     )
   }
 
-  const valid = rows.filter((r) => r.status !== 'cancelled')
-
-  const salesToday = valid
-    .filter((r) => r.sale_date === today)
-    .reduce((s, r) => s + Number(r.amount), 0)
-
-  const salesBefore = valid
-    .filter((r) => r.sale_date < today)
-    .reduce((s, r) => s + Number(r.amount), 0)
+  // Shared rule (lib/rules.ts): cancelled sales never count
+  const salesToday = activeSalesTotal(rows.filter((r) => r.sale_date === today))
+  const salesBefore = activeSalesTotal(rows.filter((r) => r.sale_date < today))
 
   const t = computeTarget({
     target: Number(profile.monthly_target),
