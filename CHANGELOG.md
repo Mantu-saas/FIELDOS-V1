@@ -1,5 +1,14 @@
 # Changelog
-## 2026-10-11 — Fix 6: Trustworthy numbers (branch fix/trusted-numbers, NOT merged, NOT deployed)
+## 2026-10-12 — C12: COACH "best next move" (branch fix/c12-coach-next-move, NOT merged, NOT deployed)
+
+- New `src/lib/coachRules.ts`: the target answer's "BEST NEXT MOVE" section, as testable rules.
+- The follow-up sentence now matches the number listed ("This follow-up carries", "These 2 follow-ups carry"), replacing the fixed "These three carry".
+- Overdue follow-ups with no expected value are listed (oldest first, up to 3) instead of being ignored. No amount is invented for them.
+- New-visit suggestions skip customers already on today's route or already listed for an overdue follow-up. A planned customer with an overdue follow-up is still shown, marked "already on today's route".
+- Unchanged: target maths, selling days, database, data, visit times.
+- Verification: 35/35 tests pass (19 new). Type-check: no new errors versus main. Local `npm run build`: BLOCKED (packages cannot be downloaded); to be verified by the Cloudflare preview build. Browser: NOT TESTED.
+
+## 2026-10-11 — Fix 6: Trustworthy numbers (PR #15; merged and deployed 2026-10-12 as 89630cb)
 
 - New `src/lib/rules.ts`: one shared rule for active sales, pending visits and the HEALTH 0-3 energy scale.
 - COACH now receives the profile (`src/pages/Shell.tsx`), so target and home-time answers use real values (C1).

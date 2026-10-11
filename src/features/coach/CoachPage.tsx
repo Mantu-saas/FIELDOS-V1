@@ -4,6 +4,7 @@ import type { Profile } from '../../types'
 import { inr, monthStart, todayIST } from '../../lib/format'
 import { computeTarget } from '../../lib/targetMath'
 import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit } from '../../lib/rules'
+import { buildNextMove } from '../../lib/coachRules'
 
 type CoachPageProps = {
   userId: string
@@ -1215,38 +1216,16 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       r += '\nNo selling day of this month is complete yet, so there is no average to compare against.\n'
     }
 
-    // Due or overdue items first, then the rest; within each group, highest value first
-    const withValue = s.open
-      .filter(f => Number(f.expected_value || 0) > 0)
-      .sort((a, b) => {
-        const aDue = a.due_date <= s.today ? 0 : 1
-        const bDue = b.due_date <= s.today ? 0 : 1
-        return aDue - bDue || Number(b.expected_value) - Number(a.expected_value)
-      })
-      .slice(0, 3)
-
-    r += '\nBEST NEXT MOVE\n'
-    if (withValue.length > 0) {
-      const total = withValue.reduce((sum, f) => sum + Number(f.expected_value), 0)
-      withValue.forEach((f, i) => {
-        r += `${i + 1}. ${customerName(f.customer_id)} — ${f.action} — due ${f.due_date}${valueText(f.expected_value)}\n`
-      })
-      r += `These three carry ${inr(total)} of expected value (figures you entered), about ${Math.round((total / s.remaining) * 100)}% of what remains. That is not a guarantee.\n`
-      r += `Start with ${customerName(withValue[0].customer_id)}.\n`
-    } else {
-      const top = customers
-        .slice()
-        .sort((a, b) => Number(b.potential_amount || 0) - Number(a.potential_amount || 0))
-        .slice(0, 3)
-        .filter(c => c.potential_amount > 0)
-      if (top.length > 0) {
-        r += 'No follow-ups have an expected value saved. Your highest-potential customers are:\n'
-        top.forEach((c, i) => { r += `${i + 1}. ${c.name} — potential ${inr(Number(c.potential_amount))}\n` })
-        r += `Start with ${top[0].name} and record an expected value on the follow-up.\n`
-      } else {
-        r += 'No follow-up values or customer potentials are saved, so I cannot rank opportunities. Add expected values to follow-ups.\n'
-      }
-    }
+    // C12: valued follow-ups, overdue ones without a value, then new-visit suggestions (lib/coachRules.ts)
+    r += buildNextMove({
+      open: s.open,
+      customers,
+      plannedTodayIds: new Set(s.todayPlanned.map(v => v.customer_id)),
+      today: s.today,
+      remaining: s.remaining,
+      nameOf: customerName,
+      money: inr,
+    })
 
     r += energyNote(s)
     if (/\bbehind\b/.test(q) && !behind) {
