@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
 
 // Reschedule an Unavailable or Cancelled visit by creating a NEW planned visit.
 // The original visit record is never updated or deleted.
+//
+// Every new visit gets the note "Rescheduled from <date> (<status>)". This screen
+// uses that note to recognise visits already created from this record, so it can
+// show them instead of quietly offering to create another one.
 
 const IST = 'Asia/Kolkata'
 const STATUS_LABEL: Record<string, string> = { unavailable: 'Unavailable', cancelled: 'Cancelled' }
@@ -27,6 +31,22 @@ function istClock(iso: string | null): string {
   return hh && mm ? `${hh}:${mm}` : '10:00'
 }
 
+// e.g. "12 Oct, 1:07 am" (India time)
+function formatWhen(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('en-IN', { timeZone: IST, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }).format(d)
+}
+
+// e.g. "1:07 am" (India time)
+function formatClock(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit', hour12: true }).format(d)
+}
+
+type CreatedFromThis = { id: string; planned_start: string }
+
 function nextDay(date: string): string {
   const [y, m, d] = date.split('-').map(Number)
   return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
@@ -40,10 +60,36 @@ export default function RescheduleVisit({ userId, visit, onDone }: { userId: str
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [createdFor, setCreatedFor] = useState<string | null>(null)
+  // Planned visits that were already created from this cancelled/unavailable record
+  const [already, setAlready] = useState<CreatedFromThis[]>([])
+
+  const eligible = visit.status === 'unavailable' || visit.status === 'cancelled'
+  const label = eligible ? STATUS_LABEL[visit.status] : ''
+  const marker = `Rescheduled from ${istDay(visit.planned_start) ?? today} (${label})`
+
+  useEffect(() => {
+    if (!eligible) return
+    let off = false
+    async function findExisting() {
+      const r = await supabase
+        .from('visits')
+        .select('id,planned_start')
+        .eq('user_id', userId)
+        .eq('customer_id', visit.customer_id)
+        .eq('status', 'planned')
+        .eq('notes', marker)
+        .order('planned_start', { ascending: true })
+      // If this lookup fails, carry on as before: the same-date check below still protects against duplicates
+      if (off || r.error) return
+      const rows = (r.data ?? []) as unknown as { id: string; planned_start: string | null }[]
+      setAlready(rows.filter(row => row.planned_start).map(row => ({ id: row.id, planned_start: row.planned_start as string })))
+    }
+    void findExisting()
+    return () => { off = true }
+  }, [eligible, userId, visit.customer_id, marker])
 
   // Only Unavailable and Cancelled visits can be rescheduled this way
-  if (visit.status !== 'unavailable' && visit.status !== 'cancelled') return null
-  const label = STATUS_LABEL[visit.status]
+  if (!eligible) return null
 
   async function reschedule() {
     if (busy || createdFor) return
@@ -61,30 +107,35 @@ export default function RescheduleVisit({ userId, visit, onDone }: { userId: str
     // Block a second planned visit for the same customer on the same date
     const existing = await supabase
       .from('visits')
-      .select('id')
+      .select('id,planned_start')
       .eq('user_id', userId)
       .eq('customer_id', visit.customer_id)
       .eq('status', 'planned')
       .gte('planned_start', `${date}T00:00:00+05:30`)
-      .lte('planned_start', `${date}T23:59:59+05:30`)
+      .lt('planned_start', `${nextDay(date)}T00:00:00+05:30`)
+      .order('planned_start', { ascending: true })
       .limit(1)
 
     if (existing.error) {
       setBusy(false)
       return setMsg('Could not check your schedule: ' + existing.error.message)
     }
-    if ((existing.data ?? []).length > 0) {
+    const found = (existing.data ?? []) as unknown as { planned_start: string | null }[]
+    if (found.length > 0) {
       setBusy(false)
-      return setMsg(`This customer already has a planned visit on ${date}. Choose another date, or open that visit from the route.`)
+      const who = visit.customers?.name ?? 'This customer'
+      const at = found[0].planned_start ? ` at ${formatClock(found[0].planned_start)}` : ''
+      // The route screen only lists today's visits, so only point to it when the clash is today
+      const advice = date === today ? "Open it from today's route, or choose another date." : 'Choose another date.'
+      return setMsg(`${who} already has a planned visit on ${date}${at}. ${advice}`)
     }
 
-    const original = istDay(visit.planned_start) ?? today
     const { error } = await supabase.from('visits').insert({
       user_id: userId,
       customer_id: visit.customer_id,
       planned_start: plannedStart,
       status: 'planned',
-      notes: `Rescheduled from ${original} (${label})`
+      notes: marker
     })
 
     setBusy(false)
@@ -103,6 +154,15 @@ export default function RescheduleVisit({ userId, visit, onDone }: { userId: str
   }
 
   if (!open) {
+    if (already.length > 0) {
+      return (
+        <div className="tip">
+          <b>Already rescheduled to {already.map(v => formatWhen(v.planned_start)).join('; ')}.</b>
+          <p className="small">These planned visits were created from this record. Open them from the route on their day.</p>
+          <button className="link" onClick={() => { setOpen(true); setMsg('') }}>Schedule another visit anyway</button>
+        </div>
+      )
+    }
     return <button className="primary" onClick={() => { setOpen(true); setMsg('') }}>Reschedule this visit</button>
   }
 
@@ -110,6 +170,7 @@ export default function RescheduleVisit({ userId, visit, onDone }: { userId: str
     <div>
       <h2>Reschedule</h2>
       <p className="small">A new visit will be added. This {label} record stays exactly as it is.</p>
+      {already.length > 0 && <p className="small">Already scheduled from this record: {already.map(v => formatWhen(v.planned_start)).join('; ')}.</p>}
       <label>New date<input type="date" min={today} value={date} onChange={e => setDate(e.target.value)} /></label>
       <label>New time<input type="time" value={time} onChange={e => setTime(e.target.value)} /></label>
       {msg && <p className="msg">{msg}</p>}
