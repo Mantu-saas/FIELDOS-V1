@@ -6,7 +6,7 @@
 - Overdue follow-ups with no expected value are listed (oldest first, up to 3) instead of being ignored. No amount is invented for them.
 - New-visit suggestions skip customers already on today's route or already listed for an overdue follow-up. A planned customer with an overdue follow-up is still shown, marked "already on today's route".
 - Unchanged: target maths, selling days, database, data, visit times.
-- Verification: 32/32 tests pass (16 new). Type-check: no new errors versus main. Local `npm run build`: BLOCKED (packages cannot be downloaded); to be verified by the Cloudflare preview build. Browser: NOT TESTED.
+- Verification: 35/35 tests pass (19 new). Type-check: no new errors versus main. Local `npm run build`: BLOCKED (packages cannot be downloaded); to be verified by the Cloudflare preview build. Browser: NOT TESTED.
 
 ## 2026-10-11 — Fix 6: Trustworthy numbers (PR #15; merged and deployed 2026-10-12 as 89630cb)
 

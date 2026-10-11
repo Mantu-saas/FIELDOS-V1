@@ -85,8 +85,11 @@ export function buildNextMove<F extends FollowUpLike & { action: string }, C ext
   if (overdueNoValue.length > 0) {
     r += '\nOVERDUE — NO VALUE RECORDED\n'
     overdueNoValue.forEach((f, n) => { r += line(f, n + 1) })
-    r += 'No expected value is saved for these, so they are not counted toward your target. ' +
-      'Complete, reschedule or drop them so they do not slip further.\n'
+    r += overdueNoValue.length === 1
+      ? 'No expected value is saved for this one, so it is not counted toward your target. ' +
+        'Complete, reschedule or drop it so it does not slip further.\n'
+      : 'No expected value is saved for these, so they are not counted toward your target. ' +
+        'Complete, reschedule or drop them so they do not slip further.\n'
   }
 
   if (withValue.length > 0) {

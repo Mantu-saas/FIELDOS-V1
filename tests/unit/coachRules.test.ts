@@ -76,6 +76,40 @@ test('overdue-no-value section appears alongside valued follow-ups, and valued o
   assert.ok(text.includes('Start with Asha.'))
 })
 
+test('overdue section is NOT shown when no overdue follow-up lacks a value', () => {
+  const cases = {
+    'no follow-ups': [],
+    'overdue but has a value': [fu('a', '2026-10-01', 500)],
+    'due today, no value': [fu('a', TODAY, 0)],
+    'due later, no value': [fu('a', '2026-10-20', 0)],
+  }
+  for (const [label, open] of Object.entries(cases)) {
+    const text = buildNextMove({ ...base, open, customers: [cust('b', 5000)] })
+    assert.ok(!text.includes('OVERDUE — NO VALUE RECORDED'), label)
+    assert.ok(!text.includes('No expected value is saved for'), label)
+  }
+})
+
+test('overdue section wording: singular for one item, plural for two or three', () => {
+  const sectionOf = (t: string) => t.split('OVERDUE — NO VALUE RECORDED\n')[1].split('\n\n')[0]
+  const one = sectionOf(buildNextMove({ ...base, open: [fu('a', '2026-10-01', 0)] }))
+  assert.equal(one.split('\n').filter(l => /^\d\./.test(l)).length, 1)
+  assert.ok(one.includes('for this one, so it is not counted'))
+  assert.ok(!one.includes('these'))
+  for (const n of [2, 3]) {
+    const open = ['a', 'b', 'c'].slice(0, n).map((id, k) => fu(id, `2026-10-0${k + 1}`, 0))
+    const sec = sectionOf(buildNextMove({ ...base, open }))
+    assert.equal(sec.split('\n').filter(l => /^\d\./.test(l)).length, n, `lines for ${n}`)
+    assert.ok(sec.includes('for these, so they are not counted'), `plural for ${n}`)
+  }
+})
+
+test('a missing (null) expected value counts as no value', () => {
+  const open = [{ customer_id: 'a', due_date: '2026-10-01', expected_value: null, action: 'Call' }]
+  assert.equal(overdueWithoutValue(open, TODAY).length, 1)
+  assert.equal(valuedFollowUps(open, TODAY).length, 0)
+})
+
 test('at most three overdue follow-ups without a value are listed', () => {
   const open = ['a', 'b', 'c', 'd'].map((id, n) => fu(id, `2026-10-0${n + 1}`, 0))
   assert.equal(overdueWithoutValue(open, TODAY).length, 3)
