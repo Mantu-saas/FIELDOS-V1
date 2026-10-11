@@ -1,4 +1,16 @@
 # Changelog
+## 2026-10-11 — Fix 6: Trustworthy numbers (branch fix/trusted-numbers, NOT merged, NOT deployed)
+
+- New `src/lib/rules.ts`: one shared rule for active sales, pending visits and the HEALTH 0-3 energy scale.
+- COACH now receives the profile (`src/pages/Shell.tsx`), so target and home-time answers use real values (C1).
+- My Week sales summary excludes cancelled sales (C2).
+- COACH uses TODAY's target maths (`lib/targetMath.ts`); no pace verdict before the first completed selling day (C5).
+- COACH treats only Tired/Drained as low energy and shows energy as words, not "/10" (C3).
+- COACH no longer counts rescheduled visits as still planned for today (C4).
+- Added `npm test` (Node built-in runner, no new packages) with 16 unit and wiring tests.
+- Verification: 16/16 tests pass locally; type-check shows no new errors versus main (stand-in library types).
+  Full `npm run build`: BLOCKED locally (packages cannot be downloaded); to be verified by a Cloudflare preview build.
+  Browser testing: NOT TESTED.
 ## 2026-10-10 — Fix 4: Coach answers and loading state verified
 
 - Updated `src/features/coach/CoachPage.tsx` with the reviewed Coach fix.

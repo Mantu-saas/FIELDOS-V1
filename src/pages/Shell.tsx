@@ -55,7 +55,7 @@ export default function Shell({ profile }: { profile: Profile }) {
           )}
           {tab === 'ROUTE' && <RoutePage userId={profile.id} />}
           {tab === 'HEALTH' && <HealthPage userId={profile.id} />}
-          {tab === 'COACH' && <CoachPage userId={profile.id} />}
+          {tab === 'COACH' && <CoachPage userId={profile.id} profile={profile} />}
           {tab === 'LIFE' && <LifePage profile={profile} />}
         </div>
       </main>
