@@ -1,77 +1,126 @@
+
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
 
-// Reschedule an Unavailable or Cancelled visit by creating a NEW planned visit.
-// The original visit record is never updated or deleted.
-//
-// Every new visit gets the note "Rescheduled from <date> (<status>)". This screen
-// uses that note to recognise visits already created from this record, so it can
-// show them instead of quietly offering to create another one.
-
 const IST = 'Asia/Kolkata'
-const STATUS_LABEL: Record<string, string> = { unavailable: 'Unavailable', cancelled: 'Cancelled' }
+
+const STATUS_LABEL: Record<string, string> = {
+  unavailable: 'Unavailable',
+  cancelled: 'Cancelled'
+}
+
+type PlannedVisit = {
+  id: string
+  planned_start: string
+}
 
 function istDay(iso: string | null): string | null {
   if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: IST }).format(d)
+
+  const date = new Date(iso)
+
+  if (Number.isNaN(date.getTime())) return null
+
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: IST
+  }).format(date)
 }
 
-// Time of day (HH:MM, India time) of the original visit; 10:00 if it has none
 function istClock(iso: string | null): string {
   if (!iso) return '10:00'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '10:00'
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d)
-  const get = (type: string) => parts.find(p => p.type === type)?.value ?? ''
-  const hh = get('hour')
-  const mm = get('minute')
-  return hh && mm ? `${hh}:${mm}` : '10:00'
+
+  const date = new Date(iso)
+
+  if (Number.isNaN(date.getTime())) return '10:00'
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: IST,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date)
+
+  const hour = parts.find(part => part.type === 'hour')?.value
+  const minute = parts.find(part => part.type === 'minute')?.value
+
+  return hour && minute ? `${hour}:${minute}` : '10:00'
 }
 
-// e.g. "12 Oct, 1:07 am" (India time)
 function formatWhen(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return new Intl.DateTimeFormat('en-IN', { timeZone: IST, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }).format(d)
+  const date = new Date(iso)
+
+  if (Number.isNaN(date.getTime())) return 'Unknown time'
+
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: IST,
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  }).format(date)
 }
 
-// e.g. "1:07 am" (India time)
 function formatClock(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return new Intl.DateTimeFormat('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit', hour12: true }).format(d)
-}
+  const date = new Date(iso)
 
-type CreatedFromThis = { id: string; planned_start: string }
+  if (Number.isNaN(date.getTime())) return ''
+
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: IST,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  }).format(date)
+}
 
 function nextDay(date: string): string {
-  const [y, m, d] = date.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+  const [year, month, day] = date.split('-').map(Number)
+
+  return new Date(
+    Date.UTC(year, month - 1, day + 1)
+  ).toISOString().slice(0, 10)
 }
 
-export default function RescheduleVisit({ userId, visit, onDone }: { userId: string; visit: VisitRow; onDone: () => void }) {
+export default function RescheduleVisit({
+  userId,
+  visit,
+  onDone
+}: {
+  userId: string
+  visit: VisitRow
+  onDone: () => void
+}) {
   const today = todayIST()
-  const [open, setOpen] = useState(false)
+
+  const [mode, setMode] = useState<'move' | 'additional' | null>(null)
   const [date, setDate] = useState(nextDay(today))
   const [time, setTime] = useState(istClock(visit.planned_start))
+  const [moveId, setMoveId] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
-  const [createdFor, setCreatedFor] = useState<string | null>(null)
-  // Planned visits that were already created from this cancelled/unavailable record
-  const [already, setAlready] = useState<CreatedFromThis[]>([])
+  const [success, setSuccess] = useState('')
+  const [already, setAlready] = useState<PlannedVisit[]>([])
 
-  const eligible = visit.status === 'unavailable' || visit.status === 'cancelled'
+  const eligible =
+    visit.status === 'unavailable' ||
+    visit.status === 'cancelled'
+
   const label = eligible ? STATUS_LABEL[visit.status] : ''
-  const marker = `Rescheduled from ${istDay(visit.planned_start) ?? today} (${label})`
+
+  const marker =
+    `Rescheduled from ${istDay(visit.planned_start) ?? today} (${label})`
 
   useEffect(() => {
     if (!eligible) return
-    let off = false
-    async function findExisting() {
-      const r = await supabase
+
+    let cancelled = false
+
+    async function loadRelatedVisits() {
+      const result = await supabase
         .from('visits')
         .select('id,planned_start')
         .eq('user_id', userId)
@@ -79,103 +128,383 @@ export default function RescheduleVisit({ userId, visit, onDone }: { userId: str
         .eq('status', 'planned')
         .eq('notes', marker)
         .order('planned_start', { ascending: true })
-      // If this lookup fails, carry on as before: the same-date check below still protects against duplicates
-      if (off || r.error) return
-      const rows = (r.data ?? []) as unknown as { id: string; planned_start: string | null }[]
-      setAlready(rows.filter(row => row.planned_start).map(row => ({ id: row.id, planned_start: row.planned_start as string })))
-    }
-    void findExisting()
-    return () => { off = true }
-  }, [eligible, userId, visit.customer_id, marker])
 
-  // Only Unavailable and Cancelled visits can be rescheduled this way
+      if (cancelled) return
+
+      if (result.error) {
+        setMsg(
+          'Could not load existing planned visits: ' +
+          result.error.message
+        )
+        return
+      }
+
+      const rows = (result.data ?? []) as PlannedVisit[]
+
+      setAlready(
+        rows.filter(
+          row => row.id && row.planned_start
+        )
+      )
+    }
+
+    void loadRelatedVisits()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    eligible,
+    userId,
+    visit.customer_id,
+    marker
+  ])
+
   if (!eligible) return null
 
-  async function reschedule() {
-    if (busy || createdFor) return
+  function startMode(nextMode: 'move' | 'additional') {
     setMsg('')
+    setSuccess('')
+    setMode(nextMode)
 
-    if (!date || !time) return setMsg('Please choose a date and a time.')
-    if (date < today) return setMsg('The new date cannot be in the past.')
+    if (nextMode === 'move' && already.length > 0) {
+      setMoveId(already[0].id)
+      setDate(nextDay(today))
+      setTime(istClock(already[0].planned_start))
+    } else {
+      setMoveId('')
+      setDate(nextDay(today))
+      setTime(istClock(visit.planned_start))
+    }
+  }
+
+  async function saveVisit() {
+    if (busy) return
+
+    setMsg('')
+    setSuccess('')
+
+    if (mode === 'move' && !moveId) {
+      setMsg('Choose the planned visit you want to move.')
+      return
+    }
+
+    if (!date || !time) {
+      setMsg('Please choose a date and time.')
+      return
+    }
+
+    if (date < today) {
+      setMsg('The new date cannot be in the past.')
+      return
+    }
+
     const plannedStart = `${date}T${time}:00+05:30`
     const startMs = new Date(plannedStart).getTime()
-    if (!Number.isFinite(startMs)) return setMsg('Please enter a valid date and time.')
-    if (startMs <= Date.now()) return setMsg('The new time must be in the future.')
+
+    if (!Number.isFinite(startMs)) {
+      setMsg('Please enter a valid date and time.')
+      return
+    }
+
+    if (startMs <= Date.now()) {
+      setMsg('The new time must be in the future.')
+      return
+    }
 
     setBusy(true)
 
-    // Block a second planned visit for the same customer on the same date
-    const existing = await supabase
-      .from('visits')
-      .select('id,planned_start')
-      .eq('user_id', userId)
-      .eq('customer_id', visit.customer_id)
-      .eq('status', 'planned')
-      .gte('planned_start', `${date}T00:00:00+05:30`)
-      .lt('planned_start', `${nextDay(date)}T00:00:00+05:30`)
-      .order('planned_start', { ascending: true })
-      .limit(1)
+    try {
+      // Check the selected customer's schedule for this date.
+      // When moving a visit, exclude that visit's own ID.
+      let duplicateQuery = supabase
+        .from('visits')
+        .select('id,planned_start')
+        .eq('user_id', userId)
+        .eq('customer_id', visit.customer_id)
+        .eq('status', 'planned')
+        .gte('planned_start', `${date}T00:00:00+05:30`)
+        .lt('planned_start', `${nextDay(date)}T00:00:00+05:30`)
 
-    if (existing.error) {
+      if (mode === 'move') {
+        duplicateQuery = duplicateQuery.neq('id', moveId)
+      }
+
+      const duplicateResult = await duplicateQuery
+        .order('planned_start', { ascending: true })
+        .limit(1)
+
+      if (duplicateResult.error) {
+        setMsg(
+          'Could not check your schedule: ' +
+          duplicateResult.error.message
+        )
+        return
+      }
+
+      const duplicates = duplicateResult.data ?? []
+
+      if (duplicates.length > 0) {
+        const existingTime = duplicates[0].planned_start
+          ? ` at ${formatClock(duplicates[0].planned_start)}`
+          : ''
+
+        setMsg(
+          `${visit.customers?.name ?? 'This customer'} already has a planned visit on ${date}${existingTime}. Choose another date.`
+        )
+        return
+      }
+
+      if (mode === 'move') {
+        // Update the existing row. Do not insert a replacement row.
+        const result = await supabase
+          .from('visits')
+          .update({
+            planned_start: plannedStart
+          })
+          .eq('id', moveId)
+          .eq('user_id', userId)
+          .eq('customer_id', visit.customer_id)
+          .eq('status', 'planned')
+          .select('id,planned_start')
+
+        if (result.error) {
+          setMsg(
+            'Could not move the visit: ' +
+            result.error.message
+          )
+          return
+        }
+
+        if (!result.data || result.data.length !== 1) {
+          setMsg(
+            'The visit was not confirmed as updated. It may have changed or may no longer be available. Refresh and check your route before trying again.'
+          )
+          return
+        }
+
+        const updated = result.data[0] as PlannedVisit
+
+        setAlready(current =>
+          current
+            .map(item =>
+              item.id === updated.id ? updated : item
+            )
+            .sort((a, b) =>
+              a.planned_start.localeCompare(b.planned_start)
+            )
+        )
+
+        setSuccess(
+          `Visit moved successfully to ${formatWhen(updated.planned_start)}.`
+        )
+      } else {
+        // Additional visit: create a separate row.
+        const result = await supabase
+          .from('visits')
+          .insert({
+            user_id: userId,
+            customer_id: visit.customer_id,
+            planned_start: plannedStart,
+            status: 'planned',
+            notes: marker
+          })
+          .select('id,planned_start')
+
+        if (result.error) {
+          setMsg(
+            'Could not schedule the additional visit: ' +
+            result.error.message
+          )
+          return
+        }
+
+        if (!result.data || result.data.length !== 1) {
+          setMsg(
+            'The new visit was not confirmed as saved. Refresh and check your route before trying again.'
+          )
+          return
+        }
+
+        const created = result.data[0] as PlannedVisit
+
+        setAlready(current =>
+          [...current, created].sort((a, b) =>
+            a.planned_start.localeCompare(b.planned_start)
+          )
+        )
+
+        setSuccess(
+          `Additional visit scheduled for ${formatWhen(created.planned_start)}.`
+        )
+      }
+    } catch {
+      setMsg(
+        'Something went wrong while saving. Refresh and check your route before trying again.'
+      )
+    } finally {
       setBusy(false)
-      return setMsg('Could not check your schedule: ' + existing.error.message)
     }
-    const found = (existing.data ?? []) as unknown as { planned_start: string | null }[]
-    if (found.length > 0) {
-      setBusy(false)
-      const who = visit.customers?.name ?? 'This customer'
-      const at = found[0].planned_start ? ` at ${formatClock(found[0].planned_start)}` : ''
-      // The route screen only lists today's visits, so only point to it when the clash is today
-      const advice = date === today ? "Open it from today's route, or choose another date." : 'Choose another date.'
-      return setMsg(`${who} already has a planned visit on ${date}${at}. ${advice}`)
-    }
-
-    const { error } = await supabase.from('visits').insert({
-      user_id: userId,
-      customer_id: visit.customer_id,
-      planned_start: plannedStart,
-      status: 'planned',
-      notes: marker
-    })
-
-    setBusy(false)
-    if (error) return setMsg('Could not schedule the new visit: ' + error.message)
-    setCreatedFor(`${date} at ${time}`)
   }
 
-  if (createdFor) {
+  if (success) {
     return (
       <div className="tip">
-        <b>New visit scheduled for {createdFor}.</b>
-        <p className="small">The original {label} record has not been changed.</p>
-        <button className="link" onClick={onDone}>Back to route</button>
+        <b>{success}</b>
+
+        <p className="small">
+          The original {label.toLowerCase()} record remains unchanged.
+        </p>
+
+        <button
+          className="primary"
+          onClick={onDone}
+        >
+          Back to route
+        </button>
+
+        <button
+          className="link"
+          onClick={() => {
+            setSuccess('')
+            setMsg('')
+            setMode(null)
+          }}
+        >
+          Continue planning
+        </button>
       </div>
     )
   }
 
-  if (!open) {
-    if (already.length > 0) {
-      return (
-        <div className="tip">
-          <b>Already rescheduled to {already.map(v => formatWhen(v.planned_start)).join('; ')}.</b>
-          <p className="small">These planned visits were created from this record. Open them from the route on their day.</p>
-          <button className="link" onClick={() => { setOpen(true); setMsg('') }}>Schedule another visit anyway</button>
-        </div>
-      )
-    }
-    return <button className="primary" onClick={() => { setOpen(true); setMsg('') }}>Reschedule this visit</button>
-  }
-
   return (
     <div>
-      <h2>Reschedule</h2>
-      <p className="small">A new visit will be added. This {label} record stays exactly as it is.</p>
-      {already.length > 0 && <p className="small">Already scheduled from this record: {already.map(v => formatWhen(v.planned_start)).join('; ')}.</p>}
-      <label>New date<input type="date" min={today} value={date} onChange={e => setDate(e.target.value)} /></label>
-      <label>New time<input type="time" value={time} onChange={e => setTime(e.target.value)} /></label>
-      {msg && <p className="msg">{msg}</p>}
-      <button className="primary" disabled={busy} onClick={reschedule}>{busy ? 'Scheduling…' : 'Schedule new visit'}</button>
-      <button className="link" disabled={busy} onClick={() => { setOpen(false); setMsg('') }}>Cancel</button>
+      <h2>Plan another visit</h2>
+
+      <p className="small">
+        The original {label.toLowerCase()} record stays unchanged.
+        You can move an existing planned visit or schedule an
+        additional visit.
+      </p>
+
+      {already.length > 0 && (
+        <div className="card">
+          <b>Existing planned visits from this record</b>
+
+          {already.map(item => (
+            <p className="small" key={item.id}>
+              {formatWhen(item.planned_start)}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {mode === null ? (
+        <div className="stack">
+          {already.length > 0 && (
+            <button
+              className="primary"
+              onClick={() => startMode('move')}
+            >
+              Move an existing visit
+            </button>
+          )}
+
+          <button
+            className={already.length > 0 ? 'link' : 'primary'}
+            onClick={() => startMode('additional')}
+          >
+            Schedule an additional visit
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="small">
+            {mode === 'move'
+              ? 'Choose the existing visit to move. Its record will be updated, not duplicated.'
+              : 'A new planned visit will be created. Existing visits will remain unchanged.'}
+          </p>
+
+          {mode === 'move' && (
+            <label>
+              Existing visit
+              <select
+                value={moveId}
+                disabled={busy}
+                onChange={event => {
+                  const selectedId = event.target.value
+                  setMoveId(selectedId)
+
+                  const selectedVisit = already.find(
+                    item => item.id === selectedId
+                  )
+
+                  if (selectedVisit) {
+                    setDate(nextDay(today))
+                    setTime(istClock(selectedVisit.planned_start))
+                  }
+
+                  setMsg('')
+                }}
+              >
+                <option value="">Choose a visit…</option>
+
+                {already.map(item => (
+                  <option key={item.id} value={item.id}>
+                    {formatWhen(item.planned_start)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label>
+            {mode === 'move' ? 'New date' : 'Visit date'}
+            <input
+              type="date"
+              min={today}
+              value={date}
+              disabled={busy}
+              onChange={event => setDate(event.target.value)}
+            />
+          </label>
+
+          <label>
+            {mode === 'move' ? 'New time' : 'Visit time'}
+            <input
+              type="time"
+              value={time}
+              disabled={busy}
+              onChange={event => setTime(event.target.value)}
+            />
+          </label>
+
+          {msg && <p className="msg">{msg}</p>}
+
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => void saveVisit()}
+          >
+            {busy
+              ? 'Saving…'
+              : mode === 'move'
+                ? 'Move existing visit'
+                : 'Schedule additional visit'}
+          </button>
+
+          <button
+            className="link"
+            disabled={busy}
+            onClick={() => {
+              setMode(null)
+              setMsg('')
+            }}
+          >
+            Back
+          </button>
+        </>
+      )}
     </div>
   )
 }
