@@ -6,6 +6,7 @@ import {
   isPendingVisit, energyLabel, isLowEnergy,
   visitSaleStates, visitSaleLabel, visitSaleLookup, VISIT_SALE_NOTE,
   isCancelledVisit, splitCancelledVisits,
+  isSaleCancellationConfirmed, markSaleCancelled,
 } from '../../src/lib/rules.ts'
 import { istDateOf } from '../../src/lib/visitTime.ts'
 
@@ -282,4 +283,32 @@ test('Fix A: ROUTE split keeps every visit, in order, with cancelled ones set ap
 test('Fix A: a cancelled visit is never pending (planning counts ignore it)', () => {
   assert.equal(isPendingVisit({ status: 'cancelled' }), false)
   assert.equal(isPendingVisit({ status: 'planned' }), true)
+})
+
+// ---------------- Fix B: cancelling a sale ----------------
+
+test('Fix B: cancellation counts as done only when the database returns that sale, cancelled', () => {
+  assert.equal(isSaleCancellationConfirmed([{ id: 's1', status: 'cancelled' }], 's1'), true)
+  // an update that matched no row returns no error but no data: NOT a success
+  assert.equal(isSaleCancellationConfirmed([], 's1'), false)
+  assert.equal(isSaleCancellationConfirmed(null, 's1'), false)
+  assert.equal(isSaleCancellationConfirmed(undefined, 's1'), false)
+  // wrong row, still active, or more than one row: NOT a success
+  assert.equal(isSaleCancellationConfirmed([{ id: 's2', status: 'cancelled' }], 's1'), false)
+  assert.equal(isSaleCancellationConfirmed([{ id: 's1', status: 'confirmed' }], 's1'), false)
+  assert.equal(isSaleCancellationConfirmed([{ id: 's1', status: 'cancelled' }, { id: 's1', status: 'cancelled' }], 's1'), false)
+})
+
+test('Fix B: a confirmed cancellation updates only that sale on screen, and totals drop at once', () => {
+  const rows = [
+    { id: 's1', status: 'confirmed', amount: 5000 },
+    { id: 's2', status: 'pending', amount: 2000 },
+    { id: 's3', status: 'confirmed', amount: 1000 },
+  ]
+  assert.equal(activeSalesTotal(rows), 8000)
+  const after = markSaleCancelled(rows, 's1')
+  assert.deepEqual(after.map(r => r.status), ['cancelled', 'pending', 'confirmed'])
+  assert.equal(activeSalesTotal(after), 3000)          // pending still counts, as before
+  assert.deepEqual(rows.map(r => r.status), ['confirmed', 'pending', 'confirmed']) // original not mutated
+  assert.deepEqual(markSaleCancelled(rows, 'nope'), rows)
 })

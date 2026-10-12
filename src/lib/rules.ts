@@ -20,6 +20,20 @@ export function activeSalesTotal(sales: SaleLike[]): number {
   return activeSales(sales).reduce((sum, sale) => sum + (Number(sale.amount) || 0), 0)
 }
 
+// SALES "Cancel": success only when the database returns exactly that one sale, now cancelled.
+// An update that matched no row returns no error, so "no error" alone is not proof.
+export function isSaleCancellationConfirmed(
+  returned: { id: string; status: string }[] | null | undefined,
+  saleId: string
+): boolean {
+  return Array.isArray(returned) && returned.length === 1 && returned[0].id === saleId && returned[0].status === 'cancelled'
+}
+
+// After a confirmed cancellation: show that sale as cancelled at once, everything else unchanged.
+export function markSaleCancelled<T extends { id: string; status: string }>(rows: T[], saleId: string): T[] {
+  return rows.map(r => (r.id === saleId ? { ...r, status: 'cancelled' } : r))
+}
+
 // ---------------- Sale entered on a visit (C18) ----------------
 // Recording a visit with a sale saves the amount on the visit AND inserts a SALES row
 // (VisitDetail.tsx): same customer, sale_date = India date of recording, same amount,

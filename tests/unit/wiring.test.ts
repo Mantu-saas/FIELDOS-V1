@@ -203,3 +203,28 @@ test('Fix A: COACH counts today\'s visits without cancelled ones', () => {
 test('Fix A: My Week shows only still-planned visits as work', () => {
   assert.match(read('src/features/myweek/MyWeekPage.tsx'), /setPlannedVisits\(visits\.filter\(visit => visit\.status === 'planned'\)\)/)
 })
+
+// ---------------- Fix B: cancelled sales ----------------
+
+test('Fix B: SALES confirms the cancellation with the database before showing it', () => {
+  const src = read('src/features/sales/SalesView.tsx')
+  const fn = src.slice(src.indexOf('async function cancelSale'), src.indexOf('const total ='))
+  assert.match(fn, /\.update\(\{ status: 'cancelled' \}\)\s*\.eq\('id', id\)\s*\.eq\('user_id', userId\)\s*\.select\('id,status'\)/)
+  assert.match(fn, /if \(error\) \{[\s\S]*?ok: false[\s\S]*?return/)
+  assert.match(fn, /if \(!isSaleCancellationConfirmed\(data, id\)\) \{[\s\S]*?ok: false[\s\S]*?return/)
+  // the on-screen change happens only after both checks
+  assert.ok(fn.indexOf('markSaleCancelled(') > fn.indexOf('isSaleCancellationConfirmed('))
+  assert.match(fn, /if \(cancellingId\) return/)       // no double cancel
+})
+
+test('Fix B: SALES shows cancelled sales struck through in red with a CANCELLED label, and uses the shared total rule', () => {
+  const src = read('src/features/sales/SalesView.tsx')
+  assert.match(src, /className=\{cancelled \? 'cancelled-text' : undefined\}/)
+  assert.match(src, /<b className="cancelled-text">\{inr\(Number\(r\.amount\)\)\}<\/b>/)
+  assert.match(src, /<span className="cancelled-label">CANCELLED<\/span>/)
+  assert.match(src, /const total = activeSalesTotal\(rows\)/)
+  // this list only loads the signed-in salesperson's own sales
+  assert.match(src, /\.from\('sales'\)\s*\.select\([\s\S]*?\)\s*\.eq\('user_id', userId\)/)
+  const css = read('src/styles.css')
+  assert.match(css, /\.cancelled-text \{[^}]*color:#b91c1c[^}]*text-decoration:line-through/)
+})
