@@ -171,6 +171,17 @@ export function energyLabel(energy: number | null | undefined): string {
   return ENERGY_LABELS[energy] ?? 'not recorded'
 }
 
+// ---------------- Stress (HEALTH check-in) ----------------
+// The HEALTH check-in does not ask about stress, so new check-ins have none. A stress
+// number is shown only if a valid whole number from 1 to 10 (the database's allowed range)
+// is actually stored. Otherwise it is treated as not recorded: never shown as "—/10",
+// never guessed, never used for advice.
+export function validStressScore(stress: number | string | null | undefined): number | null {
+  if (stress === null || stress === undefined || stress === '') return null
+  const n = Number(stress)
+  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : null
+}
+
 // Low energy = Tired or Drained. Anything outside the 0-3 scale is treated as unknown, not low.
 export function isLowEnergy(energy: number | null | undefined): boolean {
   return energy === 0 || energy === 1

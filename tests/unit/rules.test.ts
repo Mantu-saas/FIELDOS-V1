@@ -7,6 +7,7 @@ import {
   visitSaleStates, visitSaleLabel, visitSaleLookup, VISIT_SALE_NOTE,
   isCancelledVisit, splitCancelledVisits,
   isSaleCancellationConfirmed, markSaleCancelled,
+  validStressScore,
 } from '../../src/lib/rules.ts'
 import { istDateOf } from '../../src/lib/visitTime.ts'
 
@@ -311,4 +312,22 @@ test('Fix B: a confirmed cancellation updates only that sale on screen, and tota
   assert.equal(activeSalesTotal(after), 3000)          // pending still counts, as before
   assert.deepEqual(rows.map(r => r.status), ['confirmed', 'pending', 'confirmed']) // original not mutated
   assert.deepEqual(markSaleCancelled(rows, 'nope'), rows)
+})
+
+// ---------------- Fix C: stress display ----------------
+
+test('Fix C: no stress recorded means no stress score — never "—/10", never a guess', () => {
+  assert.equal(validStressScore(null), null)
+  assert.equal(validStressScore(undefined), null)
+  assert.equal(validStressScore(''), null)
+})
+
+test('Fix C: only a whole number from 1 to 10 (the database range) is a stress score', () => {
+  assert.equal(validStressScore(1), 1)
+  assert.equal(validStressScore(8), 8)
+  assert.equal(validStressScore(10), 10)
+  assert.equal(validStressScore('7'), 7)
+  for (const bad of [0, -1, 11, 2.5, Number.NaN, 'high']) {
+    assert.equal(validStressScore(bad as number), null, String(bad))
+  }
 })

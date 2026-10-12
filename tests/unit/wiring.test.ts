@@ -228,3 +228,25 @@ test('Fix B: SALES shows cancelled sales struck through in red with a CANCELLED 
   const css = read('src/styles.css')
   assert.match(css, /\.cancelled-text \{[^}]*color:#b91c1c[^}]*text-decoration:line-through/)
 })
+
+// ---------------- Fix C: stress display ----------------
+
+test('Fix C: COACH shows a stress line only when a real 1-10 score is stored', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  assert.match(src, /const stress = validStressScore\(health\?\.stress\)/)
+  // My Day card: line only rendered for a valid score; the old "—/10" fallback is gone
+  assert.match(src, /\{validStressScore\(health\.stress\) !== null && \(\s*<p>Stress: <strong>\{validStressScore\(health\.stress\)\}\/10<\/strong><\/p>/)
+  assert.doesNotMatch(src, /\?\? '—'\}\/10/)
+  assert.doesNotMatch(src, /Stress \$\{s\.stress \?\? '—'\}\/10/)
+  assert.match(src, /if \(s\.stress !== null\) r \+= ` · Stress \$\{s\.stress\}\/10`/)
+  // the rest of the wellbeing line and advice stays
+  assert.match(src, /Energy: <strong>\{energyLabel\(health\.energy\)\}<\/strong>/)
+  assert.match(src, /STRESS CHECK/)
+})
+
+test('Fix C: no new HEALTH question, scale or database column was added for stress', () => {
+  const health = read('src/features/health/HealthPage.tsx')
+  assert.doesNotMatch(health, /onClick=\{\(\) => setStress|onChange=\{[^}]*setStress/)
+  const files = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
+  assert.ok(!files.some(f => /stress/i.test(f)), files.join(', '))
+})
