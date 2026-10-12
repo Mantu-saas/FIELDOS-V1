@@ -306,7 +306,7 @@ export default function RoutePage({
 
   // Cancelled visits are kept (and can still be opened to reschedule) but are not today's work:
   // they are not numbered, not used for gaps or navigation, and are listed apart below.
-  const { active: workVisits, cancelled: cancelledVisits } = splitCancelledVisits(visits)
+  const { active: workVisits, cancelled: cancelledVisits } = splitCancelledVisits<RouteVisit>(visits)
 
   const pending = workVisits
     .filter(

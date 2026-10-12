@@ -177,7 +177,7 @@ test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared
 
 test('Fix A: ROUTE numbers, gaps and navigation use only active visits; cancelled are listed apart', () => {
   const src = read('src/features/route/RoutePage.tsx')
-  assert.match(src, /splitCancelledVisits\(visits\)/)
+  assert.match(src, /splitCancelledVisits<RouteVisit>\(visits\)/)
   assert.match(src, /workVisits\.map\(\(visit, index\)/)            // numbered list
   assert.match(src, /const current = workVisits\[index\]/)          // time gaps
   assert.match(src, /const next = workVisits/)
