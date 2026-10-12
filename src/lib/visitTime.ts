@@ -14,6 +14,26 @@ export function isValidClock(time: string | null | undefined): time is string {
   return typeof time === 'string' && CLOCK.test(time)
 }
 
+// ---------------- 30-minute scheduling slots (C17) ----------------
+// Product rule: every visit time that is SAVED (add stop, change time, reschedule) must be
+// on the hour or half-hour. Existing records are never rounded or changed.
+
+export const SLOT_MESSAGE = 'Choose a time on the hour or half-hour (for example 3:00 or 3:30).'
+
+export function isHalfHourSlot(time: string | null | undefined): time is string {
+  return isValidClock(time) && (time.endsWith(':00') || time.endsWith(':30'))
+}
+
+// The first slot at or after a time: 09:35 -> 10:00, 09:30 -> 09:30.
+// Returns null if there is no slot left that day (after 23:30).
+export function roundUpToSlot(time: string): string | null {
+  if (!isValidClock(time)) return null
+  const [h, m] = time.split(':').map(Number)
+  const mins = Math.ceil((h * 60 + m) / 30) * 30
+  if (mins >= 24 * 60) return null
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
+}
+
 // "2026-10-12" + "09:30" -> "2026-10-12T09:30:00+05:30", or null if either part is invalid.
 export function buildPlannedStart(date: string, time: string): string | null {
   if (!DATE.test(date) || !isValidClock(time)) return null
@@ -67,13 +87,19 @@ export function workingHours(start?: string | null, end?: string | null): { star
   return { start: DEFAULT_WORK_START, end: DEFAULT_WORK_END }
 }
 
-// Rescheduling default: keep the original visit's time only if it was inside working
-// hours (start inclusive, end exclusive); otherwise suggest the start of the working day.
+// Rescheduling default, always a valid half-hour slot (C10 + C17):
+// - original time inside working hours (start inclusive, end exclusive): round it UP to a slot
+//   (09:35 -> 10:00), as long as that slot is still before the end of the working day;
+// - otherwise the first slot at or after the start of the working day (08:45 -> 09:00);
+// - if the working day has no slot at all (e.g. 17:45-18:00), fall back to 09:00.
 export function suggestRescheduleTime(originalClock: string | null, hours: { start: string; end: string }): string {
+  const startSlot = roundUpToSlot(hours.start)
+  const dayStart = startSlot && startSlot < hours.end ? startSlot : DEFAULT_WORK_START
   if (isValidClock(originalClock) && originalClock >= hours.start && originalClock < hours.end) {
-    return originalClock
+    const slot = roundUpToSlot(originalClock)
+    if (slot && slot < hours.end) return slot
   }
-  return hours.start
+  return dayStart
 }
 
 // The day after a "YYYY-MM-DD" date.

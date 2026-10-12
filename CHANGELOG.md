@@ -1,5 +1,13 @@
 # Changelog
-## 2026-10-12 — C10: Visit times and rescheduling (branch fix/c10-visit-times, NOT merged, NOT deployed)
+## 2026-10-12 — C17: 30-minute visit slots (branch fix/c17-half-hour-slots, NOT merged, NOT deployed)
+
+- Product rule: every saved visit time must be on :00 or :30, in Add stop (including earlier-today logging), Change time and Reschedule.
+- The app's own check blocks off-slot times before any database call; `step={1800}` on time boxes is only a picker hint.
+- Reschedule suggestions are always slots: 09:35 -> 10:00; rounding past the end of the working day -> work start; off-slot work start (08:45) -> 09:00; a working day with no slot -> 09:00.
+- Existing visits are not rounded or changed; no database rule, migration or data change.
+- Verification: 64/64 tests pass (12 new). Build: Cloudflare preview. Browser: NOT TESTED.
+
+## 2026-10-12 — C10: Visit times and rescheduling (PR #17; merged and deployed as e1710ab)
 
 - Root cause (confirmed from live data): ROUTE stops added without a time were stamped with "now" (two visits at 01:07 on 11 Oct), and rescheduling copied that time to 12 Oct.
 - New `src/lib/visitTime.ts`: India-time helpers (next half-hour default, time/date validation, working-hours rescheduling default).
