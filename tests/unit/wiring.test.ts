@@ -121,6 +121,22 @@ test('C18: visit-sale query is scoped to this user, visit-created sales, custome
   assert.doesNotMatch(src, /monthStart/)
 })
 
+test('C18: duplicate-visit count is loaded from the database, scoped like the sales', () => {
+  const src = read('src/lib/visitSales.ts')
+  const peers = src.slice(src.indexOf(".from('visits')"))
+  assert.match(peers, /\.select\('id,customer_id,sale_amount,actual_start'\)/)
+  assert.match(peers, /\.eq\('user_id', userId\)/)
+  assert.match(peers, /\.in\('customer_id', customerIds\)/)
+  assert.match(peers, /\.gt\('sale_amount', 0\)/)
+  assert.match(peers, /\.gte\('actual_start', from\)/)
+  assert.match(peers, /\.lt\('actual_start', to\)/)
+  // a failure of either query means no status is claimed
+  assert.match(src, /if \(error\) return \{ rows: null, peers: null, error \}/)
+  for (const file of ['src/features/route/RoutePage.tsx', 'src/features/coach/CoachPage.tsx']) {
+    assert.match(read(file), /visitSaleStates\([^)]*\), [a-zA-Z]+\.rows, [a-zA-Z]+\.peers\)/, file)
+  }
+})
+
 test('C18: visit detail writes the same note the matching rule looks for', () => {
   const src = read('src/features/visits/VisitDetail.tsx')
   assert.match(src, /notes: VISIT_SALE_NOTE/)

@@ -30,7 +30,7 @@ export function activeSalesTotal(sales: SaleLike[]): number {
 //   'none'      -> no sale entered on the visit
 //   'active'    -> the matching visit sale(s) still count
 //   'cancelled' -> the matching visit sale(s) are all cancelled
-//   'unclear'   -> matches disagree, or more visits than sales could share them: check SALES
+//   'unclear'   -> matches disagree, or more visits than sales share them: check SALES
 //   'not_found' -> no match, or sales could not be loaded: check SALES
 
 export const VISIT_SALE_NOTE = 'From visit'
@@ -59,18 +59,29 @@ export function visitSaleLookup(visits: VisitForSale[]): { customerIds: string[]
 }
 
 // sales: rows loaded for visitSaleLookup(), or null when they could not be loaded.
-export function visitSaleStates(visits: VisitForSale[], sales: SaleRowLike[] | null): Record<string, VisitSaleState> {
+// peers: every recorded visit (from the database, not only the ones on screen) that has a sale
+// for the same customers and recording dates. Visits sharing customer + date + amount are
+// counted from visits AND peers (each visit once), so a matching visit planned for another
+// day still counts. Pass null when peers could not be loaded: then no status is claimed.
+export function visitSaleStates(
+  visits: VisitForSale[],
+  sales: SaleRowLike[] | null,
+  peers: VisitForSale[] | null
+): Record<string, VisitSaleState> {
   const result: Record<string, VisitSaleState> = {}
   const keyOf = (v: VisitForSale) =>
     paise(v.sale_amount) > 0 && v.customer_id && v.recorded_date
       ? saleKey(v.customer_id, v.recorded_date, paise(v.sale_amount))
       : null
 
-  // How many of these visits share each customer + date + amount
-  const visitsPerKey = new Map<string, number>()
-  for (const v of visits) {
+  // How many recorded visits share each customer + date + amount (each visit counted once)
+  const visitIdsPerKey = new Map<string, Set<string>>()
+  for (const v of [...visits, ...(peers ?? [])]) {
     const k = keyOf(v)
-    if (k) visitsPerKey.set(k, (visitsPerKey.get(k) ?? 0) + 1)
+    if (!k) continue
+    const ids = visitIdsPerKey.get(k) ?? new Set<string>()
+    ids.add(v.id)
+    visitIdsPerKey.set(k, ids)
   }
 
   const rowsPerKey = new Map<string, SaleRowLike[]>()
@@ -83,12 +94,12 @@ export function visitSaleStates(visits: VisitForSale[], sales: SaleRowLike[] | n
   for (const v of visits) {
     if (paise(v.sale_amount) <= 0) { result[v.id] = 'none'; continue }
     const k = keyOf(v)
-    if (!k || sales === null) { result[v.id] = 'not_found'; continue }
+    if (!k || sales === null || peers === null) { result[v.id] = 'not_found'; continue }
     const rows = rowsPerKey.get(k) ?? []
     if (rows.length === 0) { result[v.id] = 'not_found'; continue }
     const counted = rows.filter(isActiveSale).length
     // Fewer sales than visits sharing them: one visit's sale is missing, so no visit can be sure
-    if (rows.length < (visitsPerKey.get(k) ?? 1)) result[v.id] = 'unclear'
+    if (rows.length < (visitIdsPerKey.get(k)?.size ?? 1)) result[v.id] = 'unclear'
     else if (counted === rows.length) result[v.id] = 'active'
     else if (counted === 0) result[v.id] = 'cancelled'
     else result[v.id] = 'unclear'

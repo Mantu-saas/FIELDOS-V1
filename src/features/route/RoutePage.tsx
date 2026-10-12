@@ -169,7 +169,7 @@ export default function RoutePage({
       const loaded = (v.data ?? []) as unknown as RouteVisit[]
       // C18: load the visit sales first, then show visits and their sale status together
       const vs = await loadVisitSales(userId, loaded)
-      setSaleStates(visitSaleStates(loaded.map(toVisitForSale), vs.rows))
+      setSaleStates(visitSaleStates(loaded.map(toVisitForSale), vs.rows, vs.peers))
       setVisitSalesError(vs.error ? 'Could not check whether sales entered on visits still count: ' + vs.error : '')
       setVisits(loaded)
     }

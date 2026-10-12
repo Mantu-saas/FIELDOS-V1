@@ -341,7 +341,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
     setHealth(healthResult.data)
     setVisits(loadedVisits)
-    setVisitSaleState(visitSaleStates(loadedVisits.map(toVisitForSale), visitSales.rows))
+    setVisitSaleState(visitSaleStates(loadedVisits.map(toVisitForSale), visitSales.rows, visitSales.peers))
     setFollowUps((followUpsResult.data || []) as FollowUp[])
     setSales((salesResult.data || []) as Sale[])
     setCustomers((customersResult.data || []) as Customer[])

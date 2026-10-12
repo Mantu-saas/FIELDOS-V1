@@ -66,8 +66,13 @@ const v = (id: string, extra: Partial<{ customer_id: string; sale_amount: number
   ({ id, customer_id: 'c1', sale_amount: 5000, recorded_date: day, ...extra })
 const row = (status: string, extra: Partial<{ customer_id: string; sale_date: string; amount: number | string; notes: string | null }> = {}) =>
   ({ customer_id: 'c1', sale_date: day, amount: 5000, status, notes: VISIT_SALE_NOTE, ...extra })
-const stateOf = (visits: ReturnType<typeof v>[], sales: ReturnType<typeof row>[] | null, id = 'v1') =>
-  visitSaleStates(visits, sales)[id]
+// peers: recorded visits loaded from the database (default: none beyond the visits on screen)
+const stateOf = (
+  visits: ReturnType<typeof v>[],
+  sales: ReturnType<typeof row>[] | null,
+  id = 'v1',
+  peers: ReturnType<typeof v>[] | null = []
+) => visitSaleStates(visits, sales, peers)[id]
 
 test('C18: the marker the rule looks for is the note the visit screen writes', () => {
   assert.equal(VISIT_SALE_NOTE, 'From visit')
@@ -198,4 +203,53 @@ test('C18 old visit with no actual_start: unknown, never shown as cancelled or c
   assert.equal(stateOf(visits, [row('cancelled')]), 'not_found')
   assert.notEqual(visitSaleLabel('not_found', '₹5,000'), visitSaleLabel('cancelled', '₹5,000'))
   assert.match(visitSaleLabel('not_found', '₹5,000'), /check SALES/)
+})
+
+// ---------------- C18: duplicate matches, including visits not on screen ----------------
+
+test('C18 duplicate: identical visit planned for another day (not on screen) is counted — only one sale saved means "check SALES"', () => {
+  // ROUTE shows v1 (today). v2 was planned for yesterday but recorded today, same customer and amount.
+  const onScreen = [v('v1')]
+  const peers = [v('v1'), v('v2')] // database returns every recorded visit with a sale on that day
+  assert.equal(stateOf(onScreen, [row('confirmed')], 'v1', peers), 'unclear')
+  assert.equal(stateOf(onScreen, [row('cancelled')], 'v1', peers), 'unclear')
+  // without the peers it would have looked certain
+  assert.equal(stateOf(onScreen, [row('confirmed')], 'v1', []), 'active')
+})
+
+test('C18 duplicate: two identical visits with two sales that agree — certain, whether or not both are on screen', () => {
+  const peers = [v('v1'), v('v2')]
+  assert.equal(stateOf([v('v1')], [row('cancelled'), row('cancelled')], 'v1', peers), 'cancelled')
+  assert.equal(stateOf([v('v1')], [row('confirmed'), row('confirmed')], 'v1', peers), 'active')
+})
+
+test('C18 duplicate: two identical visits, sales disagree — "check SALES" for both', () => {
+  const visits = [v('v1'), v('v2')]
+  const sales = [row('confirmed'), row('cancelled')]
+  assert.equal(stateOf(visits, sales, 'v1', visits), 'unclear')
+  assert.equal(stateOf(visits, sales, 'v2', visits), 'unclear')
+})
+
+test('C18 duplicate: the same visit on screen and in peers is counted once', () => {
+  assert.equal(stateOf([v('v1')], [row('cancelled')], 'v1', [v('v1')]), 'cancelled')
+})
+
+test('C18 duplicate: recorded visits for another customer, day or amount are not duplicates', () => {
+  const peers = [
+    v('v1'),
+    v('v2', { customer_id: 'c2' }),
+    v('v3', { recorded_date: '2026-10-11' }),
+    v('v4', { sale_amount: 4000 }),
+  ]
+  assert.equal(stateOf([v('v1')], [row('cancelled')], 'v1', peers), 'cancelled')
+})
+
+test('C18 duplicate: an extra visit sale with no visit (more sales than visits) still needs every match to agree', () => {
+  assert.equal(stateOf([v('v1')], [row('cancelled'), row('cancelled')], 'v1', [v('v1')]), 'cancelled')
+  assert.equal(stateOf([v('v1')], [row('confirmed'), row('cancelled')], 'v1', [v('v1')]), 'unclear')
+})
+
+test('C18 duplicate: if the visit count could not be loaded, no status is claimed', () => {
+  assert.equal(stateOf([v('v1')], [row('cancelled')], 'v1', null), 'not_found')
+  assert.equal(stateOf([v('v1', { sale_amount: 0 })], [row('cancelled')], 'v1', null), 'none')
 })
