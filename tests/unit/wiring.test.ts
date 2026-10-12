@@ -110,14 +110,31 @@ test('C17: no database rule or migration was added (existing records untouched)'
   assert.ok(!files.some(f => /slot|half.?hour|interval/i.test(f)), files.join(', '))
 })
 
-test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared cancelled-sale rule', () => {
+test('C18: visit-sale query is scoped to this user, visit-created sales, customers and recording dates', () => {
+  const src = read('src/lib/visitSales.ts')
+  assert.match(src, /\.from\('sales'\)/)
+  assert.match(src, /\.eq\('user_id', userId\)/)
+  assert.match(src, /\.eq\('notes', VISIT_SALE_NOTE\)/)
+  assert.match(src, /\.in\('customer_id', customerIds\)/)
+  assert.match(src, /\.in\('sale_date', dates\)/)
+  assert.match(src, /istDateOf\(v\.actual_start\)/)
+  assert.doesNotMatch(src, /monthStart/)
+})
+
+test('C18: visit detail writes the same note the matching rule looks for', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.match(src, /notes: VISIT_SALE_NOTE/)
+  assert.doesNotMatch(src, /notes: 'From visit'/)
+})
+
+test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared rule', () => {
   const route = read('src/features/route/RoutePage.tsx')
   assert.match(route, /actual_start/)
-  assert.match(route, /\.from\('sales'\)/)
-  assert.match(route, /visitSaleState\(/)
+  assert.match(route, /loadVisitSales\(userId, loaded\)/)
+  assert.match(route, /visitSaleStates\(/)
+  assert.match(route, /visitSalesError/)
   assert.match(route, /visitSaleLabel\(saleStateOf\(visit\)/)
   assert.match(route, /saleState=\{saleStateOf\(selectedVisit\)\}/)
-  // the old unconditional " · Sale ₹X" text is gone
   assert.doesNotMatch(route, /' · Sale ' \+ inr/)
 
   const detail = read('src/features/visits/VisitDetail.tsx')
@@ -126,6 +143,7 @@ test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared
 
   const coach = read('src/features/coach/CoachPage.tsx')
   assert.match(coach, /select\('id, customer_id, planned_start, actual_start, status, sale_amount, next_action'\)/)
-  assert.match(coach, /visitSaleLabel\(visitSaleState\(v, istDateOf\(v\.actual_start\), sales\)/)
+  assert.match(coach, /loadVisitSales\(userId, loadedVisits\)/)
+  assert.match(coach, /visitSaleLabel\(visitSaleState\[v\.id\] \?\? 'not_found'/)
   assert.doesNotMatch(coach, /` — Sale \$\{inr\(Number\(v\.sale_amount\)\)\}`/)
 })

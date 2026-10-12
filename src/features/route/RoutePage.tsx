@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
-import { buildPlannedStart, isHalfHourSlot, isValidClock, istDateOf, nextHalfHourToday, SLOT_MESSAGE } from '../../lib/visitTime'
-import { visitSaleLabel, visitSaleState } from '../../lib/rules'
-import type { SaleRowLike, VisitSaleState } from '../../lib/rules'
+import { buildPlannedStart, isHalfHourSlot, isValidClock, nextHalfHourToday, SLOT_MESSAGE } from '../../lib/visitTime'
+import { visitSaleLabel, visitSaleStates } from '../../lib/rules'
+import type { VisitSaleState } from '../../lib/rules'
+import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
 import {
   istDate,
   loadWeekEvents,
@@ -133,8 +134,9 @@ export default function RoutePage({
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
-  // C18: SALES rows behind any sale entered on today's visits, to spot cancelled ones
-  const [visitSales, setVisitSales] = useState<SaleRowLike[]>([])
+  // C18: whether each visit's sale still counts in SALES (shared rule in lib/rules.ts)
+  const [saleStates, setSaleStates] = useState<Record<string, VisitSaleState>>({})
+  const [visitSalesError, setVisitSalesError] = useState('')
 
   const today = todayIST()
 
@@ -165,24 +167,11 @@ export default function RoutePage({
       setMsg("Could not load today's route: " + v.error.message)
     } else {
       const loaded = (v.data ?? []) as unknown as RouteVisit[]
+      // C18: load the visit sales first, then show visits and their sale status together
+      const vs = await loadVisitSales(userId, loaded)
+      setSaleStates(visitSaleStates(loaded.map(toVisitForSale), vs.rows))
+      setVisitSalesError(vs.error ? 'Could not check whether sales entered on visits still count: ' + vs.error : '')
       setVisits(loaded)
-
-      // C18: load only the SALES rows a visit's sale could be (same customers, same recording dates)
-      const withSale = loaded.filter(x => Number(x.sale_amount) > 0)
-      const dates = [...new Set(withSale.map(x => istDateOf(x.actual_start)).filter((d): d is string => !!d))]
-      const custIds = [...new Set(withSale.map(x => x.customer_id))]
-      if (dates.length > 0 && custIds.length > 0) {
-        const s = await supabase
-          .from('sales')
-          .select('customer_id,sale_date,amount,status')
-          .eq('user_id', userId)
-          .in('customer_id', custIds)
-          .in('sale_date', dates)
-        // On error the visit shows "check SALES" rather than claiming the sale still counts
-        setVisitSales(s.error ? [] : ((s.data ?? []) as SaleRowLike[]))
-      } else {
-        setVisitSales([])
-      }
     }
 
     if (c.error) {
@@ -295,9 +284,8 @@ export default function RoutePage({
 
   const selectedVisit = visits.find(visit => visit.id === selected)
 
-  // C18: shared rule decides whether a visit's sale still counts (never shown as valid once cancelled)
-  const saleStateOf = (visit: RouteVisit): VisitSaleState =>
-    visitSaleState(visit, istDateOf(visit.actual_start), visitSales)
+  // C18: a visit missing from the map (should not happen) falls back to "check SALES"
+  const saleStateOf = (visit: RouteVisit): VisitSaleState => saleStates[visit.id] ?? 'not_found'
 
   if (selectedVisit) {
     return (
@@ -416,6 +404,12 @@ export default function RoutePage({
           {eventsError && (
             <div className="card">
               <p className="msg">{eventsError}</p>
+            </div>
+          )}
+
+          {visitSalesError && (
+            <div className="card">
+              <p className="msg">{visitSalesError}</p>
             </div>
           )}
 

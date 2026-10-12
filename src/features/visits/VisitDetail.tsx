@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
-import { visitSaleLabel } from '../../lib/rules'
+import { VISIT_SALE_NOTE, visitSaleLabel } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
 import RescheduleVisit from './RescheduleVisit'
 import ChangeVisitTime from './ChangeVisitTime'
@@ -70,7 +70,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
 
     const problems: string[] = []
     if (saleN > 0) {
-      const r = await supabase.from('sales').insert({ user_id: userId, customer_id: visit.customer_id, sale_date: today, amount: saleN, notes: 'From visit' })
+      const r = await supabase.from('sales').insert({ user_id: userId, customer_id: visit.customer_id, sale_date: today, amount: saleN, notes: VISIT_SALE_NOTE })
       if (r.error) problems.push('the sale (' + r.error.message + ')')
     }
     if (fuDate) {

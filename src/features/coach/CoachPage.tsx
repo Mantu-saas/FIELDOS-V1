@@ -3,8 +3,9 @@ import { supabase } from '../../lib/supabase'
 import type { Profile } from '../../types'
 import { inr, monthStart, todayIST } from '../../lib/format'
 import { computeTarget } from '../../lib/targetMath'
-import { istDateOf } from '../../lib/visitTime'
-import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit, visitSaleLabel, visitSaleState } from '../../lib/rules'
+import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
+import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit, visitSaleLabel, visitSaleStates } from '../../lib/rules'
+import type { VisitSaleState } from '../../lib/rules'
 import { buildNextMove } from '../../lib/coachRules'
 
 type CoachPageProps = {
@@ -247,6 +248,8 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
   const [visits, setVisits] = useState<Visit[]>([])
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [sales, setSales] = useState<Sale[]>([])
+  // C18: whether each visit's sale still counts in SALES (looked up by the visit's recording date)
+  const [visitSaleState, setVisitSaleState] = useState<Record<string, VisitSaleState>>({})
   const [customers, setCustomers] = useState<Customer[]>([])
   const [personalEvents, setPersonalEvents] = useState<PersonalEvent[]>([])
 
@@ -332,14 +335,21 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       return
     }
 
+    // C18: sales behind visit sales, by recording date (may be before this month), scoped to this user
+    const loadedVisits = (visitsResult.data || []) as Visit[]
+    const visitSales = await loadVisitSales(userId, loadedVisits)
+
     setHealth(healthResult.data)
-    setVisits((visitsResult.data || []) as Visit[])
+    setVisits(loadedVisits)
+    setVisitSaleState(visitSaleStates(loadedVisits.map(toVisitForSale), visitSales.rows))
     setFollowUps((followUpsResult.data || []) as FollowUp[])
     setSales((salesResult.data || []) as Sale[])
     setCustomers((customersResult.data || []) as Customer[])
     setPersonalEvents((eventsResult.data || []) as PersonalEvent[])
     if (eventsResult.error) {
       setError(`Personal events could not be loaded: ${eventsResult.error.message}`)
+    } else if (visitSales.error) {
+      setError(`Could not check whether sales entered on visits still count: ${visitSales.error}`)
     }
 
     setLoading(false)
@@ -951,11 +961,11 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       v => !['planned', 'visited', 'unavailable', 'rescheduled', 'cancelled'].includes(v.status)
     )
 
-    // C18: shared rule; a sale cancelled in SALES is never shown as if it still counts.
-    // `sales` covers this month up to today, which includes the day any of these visits was recorded.
+    // C18: shared rule; a sale cancelled in SALES is never shown as if it still counts,
+    // and an uncertain match says "check SALES"
     const sale = (v: Visit) =>
       Number(v.sale_amount) > 0
-        ? ` — ${visitSaleLabel(visitSaleState(v, istDateOf(v.actual_start), sales), inr(Number(v.sale_amount)))}`
+        ? ` — ${visitSaleLabel(visitSaleState[v.id] ?? 'not_found', inr(Number(v.sale_amount)))}`
         : ''
     const line = (v: Visit) => `• ${customerName(v.customer_id)}`
     const section = (title: string, rows: string[]) =>

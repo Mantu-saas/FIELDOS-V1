@@ -21,48 +21,91 @@ export function activeSalesTotal(sales: SaleLike[]): number {
 }
 
 // ---------------- Sale entered on a visit (C18) ----------------
-// Recording a visit with a sale saves the amount on the visit AND inserts a row in SALES
-// (VisitDetail.tsx: same customer, sale_date = India date of recording, same amount).
-// The database has no link column between the two, so the SALES row is found the same way
-// it was created. If that sale was later cancelled in SALES, the visit must not keep showing
-// the amount as if it still counted. Display only: totals already come from activeSalesTotal.
+// Recording a visit with a sale saves the amount on the visit AND inserts a SALES row
+// (VisitDetail.tsx): same customer, sale_date = India date of recording, same amount,
+// notes = VISIT_SALE_NOTE. SALES never edits notes and never writes this note on a sale
+// typed in by hand, so the note marks sales created from a visit. There is still no column
+// linking one visit to one sale, so we only say a status when every possible match agrees.
+// Display only: totals already come from activeSalesTotal.
 //   'none'      -> no sale entered on the visit
-//   'active'    -> matching SALES entry still counts
-//   'cancelled' -> every matching SALES entry is cancelled
-//   'unclear'   -> matching entries are a mix of counted and cancelled
-//   'not_found' -> no matching entry (edited in SALES, never saved, or not loaded)
+//   'active'    -> the matching visit sale(s) still count
+//   'cancelled' -> the matching visit sale(s) are all cancelled
+//   'unclear'   -> matches disagree, or more visits than sales could share them: check SALES
+//   'not_found' -> no match, or sales could not be loaded: check SALES
+
+export const VISIT_SALE_NOTE = 'From visit'
 
 export type VisitSaleState = 'none' | 'active' | 'cancelled' | 'unclear' | 'not_found'
 
-export type VisitSaleLike = { customer_id: string | null; sale_amount: number | string | null }
-export type SaleRowLike = SaleLike & { customer_id: string | null; sale_date: string }
+export type VisitForSale = {
+  id: string
+  customer_id: string | null
+  sale_amount: number | string | null
+  recorded_date: string | null // India date "YYYY-MM-DD" the visit was recorded (visits.actual_start)
+}
+export type SaleRowLike = SaleLike & { customer_id: string | null; sale_date: string; notes?: string | null }
 
 const paise = (n: number | string | null | undefined) => Math.round((Number(n) || 0) * 100)
+const saleKey = (customerId: string, date: string, amount: number) => `${customerId}|${date}|${amount}`
 
-// recordedDate: India date ("YYYY-MM-DD") the visit was recorded (from visits.actual_start).
-export function visitSaleState(visit: VisitSaleLike, recordedDate: string | null, sales: SaleRowLike[]): VisitSaleState {
-  const amount = paise(visit.sale_amount)
-  if (amount <= 0) return 'none'
-  if (!recordedDate || !visit.customer_id) return 'not_found'
-  const matches = sales.filter(
-    s => s.customer_id === visit.customer_id && s.sale_date === recordedDate && paise(s.amount) === amount
-  )
-  if (matches.length === 0) return 'not_found'
-  const counted = matches.filter(isActiveSale).length
-  if (counted === matches.length) return 'active'
-  if (counted === 0) return 'cancelled'
-  return 'unclear'
+// Which customers and recording dates to load visit sales for. Uses the RECORDING date,
+// not the current month, so a visit recorded last month still finds its sale.
+export function visitSaleLookup(visits: VisitForSale[]): { customerIds: string[]; dates: string[] } {
+  const withSale = visits.filter(v => paise(v.sale_amount) > 0 && v.customer_id && v.recorded_date)
+  return {
+    customerIds: [...new Set(withSale.map(v => v.customer_id as string))].sort(),
+    dates: [...new Set(withSale.map(v => v.recorded_date as string))].sort(),
+  }
+}
+
+// sales: rows loaded for visitSaleLookup(), or null when they could not be loaded.
+export function visitSaleStates(visits: VisitForSale[], sales: SaleRowLike[] | null): Record<string, VisitSaleState> {
+  const result: Record<string, VisitSaleState> = {}
+  const keyOf = (v: VisitForSale) =>
+    paise(v.sale_amount) > 0 && v.customer_id && v.recorded_date
+      ? saleKey(v.customer_id, v.recorded_date, paise(v.sale_amount))
+      : null
+
+  // How many of these visits share each customer + date + amount
+  const visitsPerKey = new Map<string, number>()
+  for (const v of visits) {
+    const k = keyOf(v)
+    if (k) visitsPerKey.set(k, (visitsPerKey.get(k) ?? 0) + 1)
+  }
+
+  const rowsPerKey = new Map<string, SaleRowLike[]>()
+  for (const s of sales ?? []) {
+    if (s.notes !== VISIT_SALE_NOTE || !s.customer_id) continue
+    const k = saleKey(s.customer_id, s.sale_date, paise(s.amount))
+    rowsPerKey.set(k, [...(rowsPerKey.get(k) ?? []), s])
+  }
+
+  for (const v of visits) {
+    if (paise(v.sale_amount) <= 0) { result[v.id] = 'none'; continue }
+    const k = keyOf(v)
+    if (!k || sales === null) { result[v.id] = 'not_found'; continue }
+    const rows = rowsPerKey.get(k) ?? []
+    if (rows.length === 0) { result[v.id] = 'not_found'; continue }
+    const counted = rows.filter(isActiveSale).length
+    // Fewer sales than visits sharing them: one visit's sale is missing, so no visit can be sure
+    if (rows.length < (visitsPerKey.get(k) ?? 1)) result[v.id] = 'unclear'
+    else if (counted === rows.length) result[v.id] = 'active'
+    else if (counted === 0) result[v.id] = 'cancelled'
+    else result[v.id] = 'unclear'
+  }
+  return result
 }
 
 // Words shown next to a visit. `amountText` is the already formatted amount (e.g. "₹5,000"),
 // so this file stays free of imports and Node's test runner can load it directly.
-export function visitSaleLabel(state: VisitSaleState, amountText: string): string {
+export function visitSaleLabel(state: VisitSaleState | undefined, amountText: string): string {
   switch (state) {
     case 'none': return ''
     case 'active': return `Sale ${amountText}`
     case 'cancelled': return `Sale ${amountText} cancelled in SALES — not counted`
-    case 'unclear': return `Sale ${amountText} — a matching sale was cancelled, check SALES`
-    case 'not_found': return `Sale ${amountText} entered at visit — check SALES`
+    case 'unclear': return `Sale ${amountText} entered at visit — status unclear, check SALES`
+    case 'not_found':
+    default: return `Sale ${amountText} entered at visit — check SALES`
   }
 }
 
