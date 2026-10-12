@@ -14,24 +14,51 @@ export function isValidClock(time: string | null | undefined): time is string {
   return typeof time === 'string' && CLOCK.test(time)
 }
 
-// ---------------- 30-minute scheduling slots (C17) ----------------
+// ---------------- 5-minute scheduling steps (C19, replaces C17's 30-minute slots) ----------------
 // Product rule: every visit time that is SAVED (add stop, change time, reschedule) must be
-// on the hour or half-hour. Existing records are never rounded or changed.
+// on a 5-minute step (3:00, 3:05, 3:10 ...). Existing records are never rounded or changed.
+// The screens offer only these steps (TimeSelect), so the check below is a safety net.
 
-export const SLOT_MESSAGE = 'Choose a time on the hour or half-hour (for example 3:00 or 3:30).'
+export const SLOT_MINUTES = 5
 
-export function isHalfHourSlot(time: string | null | undefined): time is string {
-  return isValidClock(time) && (time.endsWith(':00') || time.endsWith(':30'))
+export const SLOT_MESSAGE = 'Choose a time in 5-minute steps (for example 3:05 or 3:10).'
+
+export function isTimeSlot(time: string | null | undefined): time is string {
+  return isValidClock(time) && Number(time.slice(3, 5)) % SLOT_MINUTES === 0
 }
 
-// The first slot at or after a time: 09:35 -> 10:00, 09:30 -> 09:30.
-// Returns null if there is no slot left that day (after 23:30).
+// The first step at or after a time: 09:32 -> 09:35, 09:35 -> 09:35.
+// Returns null if there is no step left that day (after 23:55).
 export function roundUpToSlot(time: string): string | null {
   if (!isValidClock(time)) return null
   const [h, m] = time.split(':').map(Number)
-  const mins = Math.ceil((h * 60 + m) / 30) * 30
+  const mins = Math.ceil((h * 60 + m) / SLOT_MINUTES) * SLOT_MINUTES
   if (mins >= 24 * 60) return null
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
+}
+
+// ---------------- 12-hour display for the time picker (C19) ----------------
+
+export type Period = 'AM' | 'PM'
+export type Clock12 = { hour: string; minute: string; period: Period }
+
+export const HOUR_OPTIONS_12 = ['12', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']
+export const MINUTE_OPTIONS = Array.from({ length: 60 / SLOT_MINUTES }, (_, i) =>
+  String(i * SLOT_MINUTES).padStart(2, '0'))
+
+// "14:05" -> { hour: '2', minute: '05', period: 'PM' }; "00:30" -> 12:30 AM; null if invalid.
+export function toClock12(time: string | null | undefined): Clock12 | null {
+  if (!isValidClock(time)) return null
+  const h = Number(time.slice(0, 2))
+  return { hour: String(h % 12 === 0 ? 12 : h % 12), minute: time.slice(3, 5), period: h < 12 ? 'AM' : 'PM' }
+}
+
+// { hour: '2', minute: '05', period: 'PM' } -> "14:05"; '' if any part is missing or not offered.
+export function fromClock12(hour: string, minute: string, period: string): string {
+  if (!HOUR_OPTIONS_12.includes(hour) || !MINUTE_OPTIONS.includes(minute)) return ''
+  if (period !== 'AM' && period !== 'PM') return ''
+  const h = (Number(hour) % 12) + (period === 'PM' ? 12 : 0)
+  return `${String(h).padStart(2, '0')}:${minute}`
 }
 
 // "2026-10-12" + "09:30" -> "2026-10-12T09:30:00+05:30", or null if either part is invalid.
@@ -66,14 +93,14 @@ export function istDateOf(iso: string | null | undefined): string | null {
   return new Intl.DateTimeFormat('en-CA', { timeZone: IST }).format(d)
 }
 
-// Default for "Add stop": the next half-hour in India time, strictly after now
-// (08:10 -> 08:30, 08:30 -> 09:00). Returns '' if the next half-hour falls on
+// Default for "Add stop": the next 5-minute step in India time, strictly after now
+// (08:12 -> 08:15, 08:15 -> 08:20). Returns '' if the next step falls on
 // tomorrow, so the salesperson must pick a time for today themselves.
-export function nextHalfHourToday(now: Date = new Date()): string {
+export function nextSlotToday(now: Date = new Date()): string {
   const clock = istClockOf(now.toISOString())
   if (!clock) return ''
   const [h, m] = clock.split(':').map(Number)
-  const next = (Math.floor((h * 60 + m) / 30) + 1) * 30
+  const next = (Math.floor((h * 60 + m) / SLOT_MINUTES) + 1) * SLOT_MINUTES
   if (next >= 24 * 60) return ''
   return `${String(Math.floor(next / 60)).padStart(2, '0')}:${String(next % 60).padStart(2, '0')}`
 }
@@ -87,11 +114,11 @@ export function workingHours(start?: string | null, end?: string | null): { star
   return { start: DEFAULT_WORK_START, end: DEFAULT_WORK_END }
 }
 
-// Rescheduling default, always a valid half-hour slot (C10 + C17):
-// - original time inside working hours (start inclusive, end exclusive): round it UP to a slot
-//   (09:35 -> 10:00), as long as that slot is still before the end of the working day;
-// - otherwise the first slot at or after the start of the working day (08:45 -> 09:00);
-// - if the working day has no slot at all (e.g. 17:45-18:00), fall back to 09:00.
+// Rescheduling default, always a valid 5-minute step (C10 + C19):
+// - original time inside working hours (start inclusive, end exclusive): round it UP to a step
+//   (09:32 -> 09:35), as long as that step is still before the end of the working day;
+// - otherwise the first step at or after the start of the working day (08:42 -> 08:45);
+// - if the working day has no step at all (e.g. 17:56-17:59), fall back to 09:00.
 export function suggestRescheduleTime(originalClock: string | null, hours: { start: string; end: string }): string {
   const startSlot = roundUpToSlot(hours.start)
   const dayStart = startSlot && startSlot < hours.end ? startSlot : DEFAULT_WORK_START

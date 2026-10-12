@@ -1,4 +1,14 @@
 # Changelog
+## 2026-10-12 — C19: 5-minute visit times with a 12-hour picker (branch fix/c19-five-minute-times, NOT pushed, NOT merged, NOT deployed)
+
+- Product decision (Product Owner, during PR #19 browser testing): visit times move in 5-minute steps (3:00, 3:05, 3:10 ...), replacing C17's :00/:30 slots. Found because the free time box accepted 2:23 and then showed a red "hour or half-hour" message.
+- New `src/components/TimeSelect.tsx`: three drop-downs (Hour 12, 1 ... 11 / Minutes 00, 05 ... 55 / AM or PM). Only allowed times can be picked, so no red correction message in normal use.
+- Used in all three save flows: ROUTE Add stop, Change time, Reschedule. The app's own step check stays as a safety net before any database call.
+- Defaults: Add stop pre-fills the next 5-minute step after now (21:43 -> 21:45); Reschedule rounds an in-hours time up to the next step (09:32 -> 09:35).
+- An existing time that is not on a step (e.g. 9:37) shows its hour and AM/PM with the minutes left blank to choose. Existing visits are not rounded or changed; no database rule, migration or data change.
+- Not changed: other time boxes that are not visit times (onboarding working hours, customer best time, My Week events).
+- Verification: 71/71 tests pass (C17 tests replaced by C19 tests). Local build/type check BLOCKED (packages cannot be downloaded). Browser: NOT TESTED.
+
 ## 2026-10-12 — C17: 30-minute visit slots (branch fix/c17-half-hour-slots, NOT merged, NOT deployed)
 
 - Product rule: every saved visit time must be on :00 or :30, in Add stop (including earlier-today logging), Change time and Reschedule.

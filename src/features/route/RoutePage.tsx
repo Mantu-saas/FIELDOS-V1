@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
-import { buildPlannedStart, isHalfHourSlot, isValidClock, nextHalfHourToday, SLOT_MESSAGE } from '../../lib/visitTime'
+import { buildPlannedStart, isTimeSlot, isValidClock, nextSlotToday, SLOT_MESSAGE } from '../../lib/visitTime'
+import TimeSelect from '../../components/TimeSelect'
 import { splitCancelledVisits, visitSaleLabel, visitSaleStates } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
 import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
@@ -229,8 +230,8 @@ export default function RoutePage({
       return
     }
 
-    // 30-minute slots only, including stops logged for earlier today (C17)
-    if (!isHalfHourSlot(time)) {
+    // 5-minute steps only, including stops logged for earlier today (C19; the picker offers only these)
+    if (!isTimeSlot(time)) {
       setMsg(SLOT_MESSAGE)
       return
     }
@@ -436,16 +437,7 @@ export default function RoutePage({
                 </select>
               </label>
 
-              <label>
-                Planned time
-                <input
-                  type="time"
-                  required
-                  step={1800}
-                  value={time}
-                  onChange={event => setTime(event.target.value)}
-                />
-              </label>
+              <TimeSelect label="Planned time" value={time} onChange={setTime} />
 
               {customers.length === 0 && (
                 <p className="small">
@@ -473,7 +465,7 @@ export default function RoutePage({
               className="primary"
               onClick={() => {
                 setAdding(true)
-                setTime(nextHalfHourToday())
+                setTime(nextSlotToday())
                 setMsg('')
               }}
             >

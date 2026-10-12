@@ -47,7 +47,7 @@ test('C10: ROUTE add-stop requires a time and never falls back to "now"', () => 
   assert.doesNotMatch(addStop, /new Date\(\)\.toISOString\(\)/)
   assert.match(addStop, /if \(!isValidClock\(time\)\)/)
   assert.match(addStop, /buildPlannedStart\(today, time\)/)
-  assert.match(src, /setTime\(nextHalfHourToday\(\)\)/)
+  assert.match(src, /setTime\(nextSlotToday\(\)\)/)
   assert.doesNotMatch(src, /Planned time \(optional\)/)
 })
 
@@ -79,33 +79,46 @@ test('C10: "Change time" updates only planned_start of this planned visit and co
   assert.match(read('src/features/visits/VisitDetail.tsx'), /<ChangeVisitTime userId=\{userId\} visit=\{visit\}/)
 })
 
-// ---------- C17: 30-minute slots in all three save flows ----------
+// ---------- C19: 5-minute steps in all three save flows (replaces C17's 30-minute slots) ----------
 
 const slotCheckBeforeSave = (file: string, fnStart: string, saveCall: RegExp) => {
   const src = read(file)
   const body = src.slice(src.indexOf(fnStart))
-  const check = body.search(/if \(!isHalfHourSlot\(time\)\)/)
+  const check = body.search(/if \(!isTimeSlot\(time\)\)/)
   const save = body.search(saveCall)
-  assert.ok(check > 0, `${file}: slot check present`)
+  assert.ok(check > 0, `${file}: step check present`)
   assert.ok(save > 0, `${file}: save call present`)
-  assert.ok(check < save, `${file}: slot check runs before the database save`)
-  assert.ok(src.includes('SLOT_MESSAGE'), `${file}: shows the slot message`)
-  assert.ok(src.includes('step={1800}'), `${file}: picker hint`)
+  assert.ok(check < save, `${file}: step check runs before the database save`)
+  assert.ok(src.includes('SLOT_MESSAGE'), `${file}: safety-net message kept`)
+  // the free time box is replaced by the drop-down picker that offers only allowed times
+  assert.match(src, /<TimeSelect\b/, `${file}: uses the drop-down picker`)
+  assert.doesNotMatch(src, /type="time"/, `${file}: no free time box`)
+  assert.doesNotMatch(src, /isHalfHourSlot|step=\{1800\}/, `${file}: no 30-minute leftovers`)
 }
 
-test('C17: Add stop blocks off-slot times before inserting', () => {
+test('C19: Add stop uses the picker and checks the step before inserting', () => {
   slotCheckBeforeSave('src/features/route/RoutePage.tsx', 'async function addStop', /\.from\('visits'\)\.insert\(/)
 })
 
-test('C17: Change time blocks off-slot times before any database call', () => {
+test('C19: Change time uses the picker and checks the step before any database call', () => {
   slotCheckBeforeSave('src/features/visits/ChangeVisitTime.tsx', 'async function save', /\.from\('visits'\)/)
 })
 
-test('C17: Reschedule blocks off-slot times before any database call', () => {
+test('C19: Reschedule uses the picker and checks the step before any database call', () => {
   slotCheckBeforeSave('src/features/visits/RescheduleVisit.tsx', 'async function saveVisit', /\.from\('visits'\)/)
 })
 
-test('C17: no database rule or migration was added (existing records untouched)', () => {
+test('C19: the picker offers only hour, 5-minute and AM/PM choices', () => {
+  const src = read('src/components/TimeSelect.tsx')
+  assert.match(src, /HOUR_OPTIONS_12\.map/)
+  assert.match(src, /MINUTE_OPTIONS\.map/)
+  assert.match(src, /<option value="AM">AM<\/option>/)
+  assert.match(src, /<option value="PM">PM<\/option>/)
+  assert.match(src, /onChange\(fromClock12\(/)
+  assert.doesNotMatch(src, /<input/)
+})
+
+test('C17/C19: no database rule or migration was added (existing records untouched)', () => {
   const files = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
   assert.ok(!files.some(f => /slot|half.?hour|interval/i.test(f)), files.join(', '))
 })
