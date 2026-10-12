@@ -4,7 +4,7 @@ import type { Profile } from '../../types'
 import { inr, monthStart, todayIST } from '../../lib/format'
 import { computeTarget } from '../../lib/targetMath'
 import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
-import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit, visitSaleLabel, visitSaleStates } from '../../lib/rules'
+import { activeSalesTotal, energyLabel, isCancelledVisit, isLowEnergy, isPendingVisit, visitSaleLabel, visitSaleStates } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
 import { buildNextMove } from '../../lib/coachRules'
 
@@ -413,6 +413,8 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     const todayPlanned = todayAll.filter(isPlannedVisit)
     const tomorrowPlanned = tomorrowAll.filter(isPlannedVisit)
     const todayDone = todayAll.filter(v => v.status === 'visited')
+    // Today's work: every visit except cancelled ones (cancelled are kept only as history)
+    const todayActive = todayAll.filter(v => !isCancelledVisit(v))
     // A visit that started up to 15 minutes ago still counts as "ahead"
     const todayUpcoming = todayPlanned.filter(v => visitMinutes(v) >= nowMins - 15)
     const todayPassed = todayPlanned.filter(v => visitMinutes(v) < nowMins - 15)
@@ -457,7 +459,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
     return {
       today, tomorrow, nowMins,
-      todayAll, tomorrowAll, todayPlanned, tomorrowPlanned, todayDone, todayUpcoming, todayPassed,
+      todayAll, todayActive, tomorrowAll, todayPlanned, tomorrowPlanned, todayDone, todayUpcoming, todayPassed,
       overdue, dueToday, dueTomorrow, dueLater, open,
       eventsOn,
       mtd, todaySales, target, remaining, daysLeft, daysElapsed, required, avg, paceKnown,
@@ -1497,7 +1499,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
         health,
         today: s.today,
         tomorrow: s.tomorrow,
-        today_visits: s.todayAll.length,
+        today_visits: s.todayActive.length,
         today_planned_ahead: s.todayUpcoming.length,
         tomorrow_visits: s.tomorrowPlanned.length,
         follow_ups_overdue: s.overdue.length,
@@ -1598,7 +1600,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
       <div className="card">
         <h3>REVENUE & WORK</h3>
-        <p>Today's visits: <strong>{view.todayAll.length}</strong></p>
+        <p>Today's visits: <strong>{view.todayActive.length}</strong></p>
         <p>Tomorrow's planned visits: <strong>{view.tomorrowPlanned.length}</strong></p>
         <p>Completed visits today: <strong>{view.todayDone.length}</strong></p>
         <p>Follow-ups due/overdue: <strong>{view.overdue.length + view.dueToday.length}</strong></p>

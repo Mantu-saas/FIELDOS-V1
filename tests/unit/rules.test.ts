@@ -5,6 +5,7 @@ import {
   isActiveSale, activeSales, activeSalesTotal,
   isPendingVisit, energyLabel, isLowEnergy,
   visitSaleStates, visitSaleLabel, visitSaleLookup, VISIT_SALE_NOTE,
+  isCancelledVisit, splitCancelledVisits,
 } from '../../src/lib/rules.ts'
 import { istDateOf } from '../../src/lib/visitTime.ts'
 
@@ -252,4 +253,33 @@ test('C18 duplicate: an extra visit sale with no visit (more sales than visits) 
 test('C18 duplicate: if the visit count could not be loaded, no status is claimed', () => {
   assert.equal(stateOf([v('v1')], [row('cancelled')], 'v1', null), 'not_found')
   assert.equal(stateOf([v('v1', { sale_amount: 0 })], [row('cancelled')], 'v1', null), 'none')
+})
+
+// ---------------- Fix A: cancelled visits are history, not today's work ----------------
+
+test('Fix A: only a cancelled visit is treated as cancelled', () => {
+  assert.equal(isCancelledVisit({ status: 'cancelled' }), true)
+  for (const status of ['planned', 'visited', 'unavailable', 'rescheduled']) {
+    assert.equal(isCancelledVisit({ status }), false, status)
+  }
+})
+
+test('Fix A: ROUTE split keeps every visit, in order, with cancelled ones set apart', () => {
+  const visits = [
+    { id: 'a', status: 'visited' },
+    { id: 'b', status: 'cancelled' },
+    { id: 'c', status: 'planned' },
+    { id: 'd', status: 'rescheduled' },
+    { id: 'e', status: 'cancelled' },
+  ]
+  const { active, cancelled } = splitCancelledVisits(visits)
+  assert.deepEqual(active.map(v => v.id), ['a', 'c', 'd'])
+  assert.deepEqual(cancelled.map(v => v.id), ['b', 'e'])
+  // nothing is dropped: the cancelled visits are kept for history and can still be opened
+  assert.equal(active.length + cancelled.length, visits.length)
+})
+
+test('Fix A: a cancelled visit is never pending (planning counts ignore it)', () => {
+  assert.equal(isPendingVisit({ status: 'cancelled' }), false)
+  assert.equal(isPendingVisit({ status: 'planned' }), true)
 })

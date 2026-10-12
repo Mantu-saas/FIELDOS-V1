@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
 import { buildPlannedStart, isHalfHourSlot, isValidClock, nextHalfHourToday, SLOT_MESSAGE } from '../../lib/visitTime'
-import { visitSaleLabel, visitSaleStates } from '../../lib/rules'
+import { splitCancelledVisits, visitSaleLabel, visitSaleStates } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
 import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
 import {
@@ -304,7 +304,11 @@ export default function RoutePage({
     )
   }
 
-  const pending = visits
+  // Cancelled visits are kept (and can still be opened to reschedule) but are not today's work:
+  // they are not numbered, not used for gaps or navigation, and are listed apart below.
+  const { active: workVisits, cancelled: cancelledVisits } = splitCancelledVisits(visits)
+
+  const pending = workVisits
     .filter(
       visit =>
         visit.status === 'planned' &&
@@ -330,7 +334,7 @@ export default function RoutePage({
           : '')
 
   function getGap(index: number): string | null {
-    const current = visits[index]
+    const current = workVisits[index]
 
     if (
       !current ||
@@ -343,7 +347,7 @@ export default function RoutePage({
     const currentStart = new Date(current.planned_start).getTime()
     if (!Number.isFinite(currentStart)) return null
 
-    const next = visits
+    const next = workVisits
       .slice(index + 1)
       .find(
         visit =>
@@ -495,16 +499,20 @@ export default function RoutePage({
             <div className="card">
               <p>Loading…</p>
             </div>
-          ) : visits.length === 0 ? (
+          ) : workVisits.length === 0 ? (
             <div className="card">
-              <p>No stops for today yet. Tap "Add stop".</p>
+              <p>
+                {cancelledVisits.length > 0
+                  ? 'No active stops for today. Tap "Add stop".'
+                  : 'No stops for today yet. Tap "Add stop".'}
+              </p>
               <p className="small">
                 Stops are ordered by planned time. Automatic route
                 ordering is not enabled.
               </p>
             </div>
           ) : (
-            visits.map((visit, index) => {
+            workVisits.map((visit, index) => {
               const warnings = getWarnings(visit, events)
               const gap = getGap(index)
               const address = visit.customers?.address?.trim()
@@ -580,6 +588,28 @@ export default function RoutePage({
                 </div>
               )
             })
+          )}
+
+          {!loading && cancelledVisits.length > 0 && (
+            <div className="card">
+              <h2>Cancelled today ({cancelledVisits.length})</h2>
+              <p className="small">
+                Not part of today's work. Kept for your history; tap one to reschedule it.
+              </p>
+              {cancelledVisits.map(visit => (
+                <div
+                  key={visit.id}
+                  className="line"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setSelected(visit.id)}
+                >
+                  <span className="cancelled-text">
+                    {visit.customers?.name ?? 'Customer'} · {timeIST(visit.planned_start)}
+                  </span>
+                  <span className="cancelled-label">CANCELLED</span>
+                </div>
+              ))}
+            </div>
           )}
         </>
       )}

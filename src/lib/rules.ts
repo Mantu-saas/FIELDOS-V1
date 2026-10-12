@@ -128,6 +128,20 @@ export function isPendingVisit(visit: { status: string }): boolean {
   return visit.status === 'planned'
 }
 
+// A cancelled visit is kept for history but is never part of the day's work.
+export function isCancelledVisit(visit: { status: string }): boolean {
+  return visit.status === 'cancelled'
+}
+
+// ROUTE: today's work (planned, visited, unavailable, rescheduled) in its original order,
+// with cancelled visits set apart so they are not numbered or treated as stops.
+export function splitCancelledVisits<T extends { status: string }>(visits: T[]): { active: T[]; cancelled: T[] } {
+  return {
+    active: visits.filter(v => !isCancelledVisit(v)),
+    cancelled: visits.filter(isCancelledVisit),
+  }
+}
+
 // ---------------- Energy (HEALTH check-in) ----------------
 
 // HEALTH saves energy on a 0-3 scale (see src/features/health/HealthPage.tsx).

@@ -172,3 +172,34 @@ test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared
   assert.match(coach, /visitSaleLabel\(visitSaleState\[v\.id\] \?\? 'not_found'/)
   assert.doesNotMatch(coach, /` — Sale \$\{inr\(Number\(v\.sale_amount\)\)\}`/)
 })
+
+// ---------------- Fix A: cancelled visits ----------------
+
+test('Fix A: ROUTE numbers, gaps and navigation use only active visits; cancelled are listed apart', () => {
+  const src = read('src/features/route/RoutePage.tsx')
+  assert.match(src, /splitCancelledVisits\(visits\)/)
+  assert.match(src, /workVisits\.map\(\(visit, index\)/)            // numbered list
+  assert.match(src, /const current = workVisits\[index\]/)          // time gaps
+  assert.match(src, /const next = workVisits/)
+  assert.match(src, /const pending = workVisits/)                   // Google Maps stops
+  assert.doesNotMatch(src, /\bvisits\.map\(\(visit, index\)/)
+  // cancelled visits stay visible, clearly marked, and can be opened (to reschedule)
+  assert.match(src, /Cancelled today \(\{cancelledVisits\.length\}\)/)
+  assert.match(src, /cancelledVisits\.map\(visit =>[\s\S]*?onClick=\{\(\) => setSelected\(visit\.id\)\}[\s\S]*?CANCELLED/)
+  assert.match(src, /const selectedVisit = visits\.find/)           // opening uses the full list
+  // no new deletes: cancelling never removes data
+  assert.equal((src.match(/\.delete\(\)/g) ?? []).length, 1)        // only the existing "Remove planned stop"
+})
+
+test('Fix A: COACH counts today\'s visits without cancelled ones', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  assert.match(src, /const todayActive = todayAll\.filter\(v => !isCancelledVisit\(v\)\)/)
+  assert.match(src, /Today's visits: <strong>\{view\.todayActive\.length\}/)
+  assert.match(src, /today_visits: s\.todayActive\.length/)
+  // planned counts already use the pending rule, which excludes cancelled
+  assert.match(src, /const todayPlanned = todayAll\.filter\(isPlannedVisit\)/)
+})
+
+test('Fix A: My Week shows only still-planned visits as work', () => {
+  assert.match(read('src/features/myweek/MyWeekPage.tsx'), /setPlannedVisits\(visits\.filter\(visit => visit\.status === 'planned'\)\)/)
+})
