@@ -5,7 +5,9 @@ import { todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
 import {
   buildPlannedStart,
+  isHalfHourSlot,
   istClockOf,
+  SLOT_MESSAGE,
   suggestRescheduleTime,
   workingHours
 } from '../../lib/visitTime'
@@ -189,6 +191,12 @@ export default function RescheduleVisit({
 
     if (!date || !time) {
       setMsg('Please choose a date and time.')
+      return
+    }
+
+    // C17: 30-minute slots only
+    if (!isHalfHourSlot(time)) {
+      setMsg(SLOT_MESSAGE)
       return
     }
 
@@ -471,6 +479,7 @@ export default function RescheduleVisit({
             {mode === 'move' ? 'New time' : 'Visit time'}
             <input
               type="time"
+              step={1800}
               value={time}
               disabled={busy}
               onChange={event => setTime(event.target.value)}

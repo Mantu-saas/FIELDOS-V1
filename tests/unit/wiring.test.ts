@@ -3,7 +3,7 @@
 // real screen tests when that tooling is added.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 const read = (path: string) => readFileSync(new URL('../../' + path, import.meta.url), 'utf8')
 
@@ -77,4 +77,35 @@ test('C10: "Change time" updates only planned_start of this planned visit and co
   assert.match(src, /result\.data\.length !== 1/)
   assert.doesNotMatch(src, /\.delete\(|\.insert\(/)
   assert.match(read('src/features/visits/VisitDetail.tsx'), /<ChangeVisitTime userId=\{userId\} visit=\{visit\}/)
+})
+
+// ---------- C17: 30-minute slots in all three save flows ----------
+
+const slotCheckBeforeSave = (file: string, fnStart: string, saveCall: RegExp) => {
+  const src = read(file)
+  const body = src.slice(src.indexOf(fnStart))
+  const check = body.search(/if \(!isHalfHourSlot\(time\)\)/)
+  const save = body.search(saveCall)
+  assert.ok(check > 0, `${file}: slot check present`)
+  assert.ok(save > 0, `${file}: save call present`)
+  assert.ok(check < save, `${file}: slot check runs before the database save`)
+  assert.ok(src.includes('SLOT_MESSAGE'), `${file}: shows the slot message`)
+  assert.ok(src.includes('step={1800}'), `${file}: picker hint`)
+}
+
+test('C17: Add stop blocks off-slot times before inserting', () => {
+  slotCheckBeforeSave('src/features/route/RoutePage.tsx', 'async function addStop', /\.from\('visits'\)\.insert\(/)
+})
+
+test('C17: Change time blocks off-slot times before any database call', () => {
+  slotCheckBeforeSave('src/features/visits/ChangeVisitTime.tsx', 'async function save', /\.from\('visits'\)/)
+})
+
+test('C17: Reschedule blocks off-slot times before any database call', () => {
+  slotCheckBeforeSave('src/features/visits/RescheduleVisit.tsx', 'async function saveVisit', /\.from\('visits'\)/)
+})
+
+test('C17: no database rule or migration was added (existing records untouched)', () => {
+  const files = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
+  assert.ok(!files.some(f => /slot|half.?hour|interval/i.test(f)), files.join(', '))
 })

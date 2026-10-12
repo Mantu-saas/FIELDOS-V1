@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   isValidClock, buildPlannedStart, istClockOf, istDateOf, nextHalfHourToday,
   workingHours, suggestRescheduleTime, nextDay, DEFAULT_WORK_START,
+  isHalfHourSlot, roundUpToSlot, SLOT_MESSAGE,
 } from '../../src/lib/visitTime.ts'
 
 // India time = UTC + 5:30. Helper: an instant given as India clock time.
@@ -82,17 +83,78 @@ test('rescheduling never carries over an out-of-hours time like 1:07 AM', () => 
   assert.equal(suggestRescheduleTime('22:15', h), '09:00')
 })
 
-test('rescheduling keeps an original time that is within working hours', () => {
+test('rescheduling keeps an in-hours original time, rounded UP to a half-hour slot (C17)', () => {
   const h = workingHours(null, null)
   assert.equal(suggestRescheduleTime('09:00', h), '09:00')
-  assert.equal(suggestRescheduleTime('09:35', h), '09:35')
-  assert.equal(suggestRescheduleTime('17:59', h), '17:59')
+  assert.equal(suggestRescheduleTime('13:30', h), '13:30')
+  assert.equal(suggestRescheduleTime('09:35', h), '10:00')
+  assert.equal(suggestRescheduleTime('17:29', h), '17:30')
+})
+
+test('rounding past the end of the working day falls back to the start of the day', () => {
+  const h = workingHours(null, null)                        // 09:00-18:00
+  assert.equal(suggestRescheduleTime('17:45', h), '09:00')  // 18:00 is not before the end
+  assert.equal(suggestRescheduleTime('17:59', h), '09:00')
 })
 
 test('rescheduling uses the salesperson\'s own working hours when saved', () => {
   const h = workingHours('07:30:00', '16:00:00')
-  assert.equal(suggestRescheduleTime('07:45', h), '07:45')
+  assert.equal(suggestRescheduleTime('07:45', h), '08:00')
   assert.equal(suggestRescheduleTime('17:00', h), '07:30')
+})
+
+test('an off-slot working-day start is rounded up to the next slot', () => {
+  const h = workingHours('08:45:00', '17:00:00')
+  assert.equal(suggestRescheduleTime('01:07', h), '09:00')
+  assert.equal(suggestRescheduleTime(null, h), '09:00')
+  assert.equal(suggestRescheduleTime('08:50', h), '09:00')  // inside hours, rounded up
+})
+
+test('a working day with no slot inside it falls back safely to 09:00', () => {
+  const h = workingHours('17:45:00', '18:00:00')
+  assert.equal(suggestRescheduleTime('17:50', h), '09:00')
+  assert.equal(suggestRescheduleTime(null, h), '09:00')
+})
+
+test('every reschedule suggestion is a valid half-hour slot', () => {
+  const hourSets = [workingHours(null, null), workingHours('07:30:00', '16:00:00'), workingHours('08:45:00', '17:00:00'), workingHours('17:45:00', '18:00:00')]
+  for (const h of hourSets) {
+    for (let mins = 0; mins < 24 * 60; mins += 7) {
+      const t = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
+      assert.ok(isHalfHourSlot(suggestRescheduleTime(t, h)), `${t} with ${h.start}-${h.end}`)
+    }
+  }
+})
+
+// ---------- C17: 30-minute slots ----------
+
+test('only :00 and :30 count as half-hour slots', () => {
+  for (const ok of ['00:00', '00:30', '15:00', '15:30', '23:30']) assert.equal(isHalfHourSlot(ok), true, ok)
+  for (const bad of ['15:12', '15:29', '15:31', '00:01', '23:59', '', '3:30', '25:00', null, undefined]) {
+    assert.equal(isHalfHourSlot(bad as string | null | undefined), false, String(bad))
+  }
+})
+
+test('round up to the next slot', () => {
+  assert.equal(roundUpToSlot('09:35'), '10:00')
+  assert.equal(roundUpToSlot('09:30'), '09:30')
+  assert.equal(roundUpToSlot('09:01'), '09:30')
+  assert.equal(roundUpToSlot('00:00'), '00:00')
+  assert.equal(roundUpToSlot('23:30'), '23:30')
+  assert.equal(roundUpToSlot('23:45'), null)   // no slot left that day
+  assert.equal(roundUpToSlot('bad'), null)
+})
+
+test('the add-stop default is always a slot', () => {
+  for (let mins = 0; mins < 24 * 60; mins += 7) {
+    const clock = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
+    const t = nextHalfHourToday(ist('2026-10-12', clock))
+    assert.ok(t === '' || isHalfHourSlot(t), `${clock} -> ${t}`)
+  }
+})
+
+test('the slot message explains the rule plainly', () => {
+  assert.match(SLOT_MESSAGE, /hour or half-hour/)
 })
 
 test('no original time: suggest the start of the working day', () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
-import { buildPlannedStart, isValidClock, nextHalfHourToday } from '../../lib/visitTime'
+import { buildPlannedStart, isHalfHourSlot, isValidClock, nextHalfHourToday, SLOT_MESSAGE } from '../../lib/visitTime'
 import {
   istDate,
   loadWeekEvents,
@@ -218,6 +218,12 @@ export default function RoutePage({
       return
     }
 
+    // 30-minute slots only, including stops logged for earlier today (C17)
+    if (!isHalfHourSlot(time)) {
+      setMsg(SLOT_MESSAGE)
+      return
+    }
+
     const plannedStart = buildPlannedStart(today, time)
 
     if (!plannedStart) {
@@ -410,6 +416,7 @@ export default function RoutePage({
                 <input
                   type="time"
                   required
+                  step={1800}
                   value={time}
                   onChange={event => setTime(event.target.value)}
                 />
