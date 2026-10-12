@@ -3,12 +3,19 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
+import {
+  buildPlannedStart,
+  istClockOf,
+  suggestRescheduleTime,
+  workingHours
+} from '../../lib/visitTime'
 
 const IST = 'Asia/Kolkata'
 
 const STATUS_LABEL: Record<string, string> = {
   unavailable: 'Unavailable',
-  cancelled: 'Cancelled'
+  cancelled: 'Cancelled',
+  rescheduled: 'Rescheduled'
 }
 
 type PlannedVisit = {
@@ -26,26 +33,6 @@ function istDay(iso: string | null): string | null {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: IST
   }).format(date)
-}
-
-function istClock(iso: string | null): string {
-  if (!iso) return '10:00'
-
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) return '10:00'
-
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: IST,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23'
-  }).formatToParts(date)
-
-  const hour = parts.find(part => part.type === 'hour')?.value
-  const minute = parts.find(part => part.type === 'minute')?.value
-
-  return hour && minute ? `${hour}:${minute}` : '10:00'
 }
 
 function formatWhen(iso: string): string {
@@ -88,17 +75,27 @@ function nextDay(date: string): string {
 export default function RescheduleVisit({
   userId,
   visit,
-  onDone
+  onDone,
+  workStart,
+  workEnd
 }: {
   userId: string
   visit: VisitRow
   onDone: () => void
+  workStart?: string | null
+  workEnd?: string | null
 }) {
   const today = todayIST()
+  const hours = workingHours(workStart, workEnd)
+
+  // Keep an original time only if it was within working hours; otherwise suggest
+  // the start of the working day (C10: never carry over a 1:07 AM time).
+  const suggestTime = (iso: string | null) =>
+    suggestRescheduleTime(istClockOf(iso), hours)
 
   const [mode, setMode] = useState<'move' | 'additional' | null>(null)
   const [date, setDate] = useState(nextDay(today))
-  const [time, setTime] = useState(istClock(visit.planned_start))
+  const [time, setTime] = useState(suggestTime(visit.planned_start))
   const [moveId, setMoveId] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
@@ -107,7 +104,8 @@ export default function RescheduleVisit({
 
   const eligible =
     visit.status === 'unavailable' ||
-    visit.status === 'cancelled'
+    visit.status === 'cancelled' ||
+    visit.status === 'rescheduled'
 
   const label = eligible ? STATUS_LABEL[visit.status] : ''
 
@@ -170,11 +168,11 @@ export default function RescheduleVisit({
     if (nextMode === 'move' && already.length > 0) {
       setMoveId(already[0].id)
       setDate(nextDay(today))
-      setTime(istClock(already[0].planned_start))
+      setTime(suggestTime(already[0].planned_start))
     } else {
       setMoveId('')
       setDate(nextDay(today))
-      setTime(istClock(visit.planned_start))
+      setTime(suggestTime(visit.planned_start))
     }
   }
 
@@ -199,10 +197,10 @@ export default function RescheduleVisit({
       return
     }
 
-    const plannedStart = `${date}T${time}:00+05:30`
-    const startMs = new Date(plannedStart).getTime()
+    const plannedStart = buildPlannedStart(date, time)
+    const startMs = plannedStart ? new Date(plannedStart).getTime() : NaN
 
-    if (!Number.isFinite(startMs)) {
+    if (!plannedStart || !Number.isFinite(startMs)) {
       setMsg('Please enter a valid date and time.')
       return
     }
@@ -441,7 +439,7 @@ export default function RescheduleVisit({
 
                   if (selectedVisit) {
                     setDate(nextDay(today))
-                    setTime(istClock(selectedVisit.planned_start))
+                    setTime(suggestTime(selectedVisit.planned_start))
                   }
 
                   setMsg('')

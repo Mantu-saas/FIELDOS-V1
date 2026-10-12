@@ -1,5 +1,17 @@
 # Changelog
-## 2026-10-12 — C12: COACH "best next move" (branch fix/c12-coach-next-move, NOT merged, NOT deployed)
+## 2026-10-12 — C10: Visit times and rescheduling (branch fix/c10-visit-times, NOT merged, NOT deployed)
+
+- Root cause (confirmed from live data): ROUTE stops added without a time were stamped with "now" (two visits at 01:07 on 11 Oct), and rescheduling copied that time to 12 Oct.
+- New `src/lib/visitTime.ts`: India-time helpers (next half-hour default, time/date validation, working-hours rescheduling default).
+- ROUTE "Add stop": planned time is required, prefilled with the next half-hour; no silent "now"; double-tap guarded.
+- Rescheduling: an original time outside working hours (profile work start/end, default 09:00-18:00) is replaced by the work start time; times inside working hours are kept. Existing past-time and same-day duplicate checks kept.
+- "Rescheduled" result now leads straight to planning the replacement visit (reusing the existing flow) and no longer forces a follow-up task.
+- New "Change time or date" on planned visits (`ChangeVisitTime.tsx`): updates only that visit's planned_start, filtered by visit, user, customer and planned status; success only if exactly one row changed.
+- Unchanged: database schema, RLS, existing visits.
+- Verification: 52/52 tests pass (17 new). Local build BLOCKED (packages cannot be downloaded); verified by the Cloudflare preview build. Browser: NOT TESTED.
+- C12 (PR #16): merged and deployed 2026-10-12 as 59da26f.
+
+## 2026-10-12 — C12: COACH "best next move" (PR #16)
 
 - New `src/lib/coachRules.ts`: the target answer's "BEST NEXT MOVE" section, as testable rules.
 - The follow-up sentence now matches the number listed ("This follow-up carries", "These 2 follow-ups carry"), replacing the fixed "These three carry".

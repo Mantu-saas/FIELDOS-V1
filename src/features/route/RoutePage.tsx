@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
+import { buildPlannedStart, isValidClock, nextHalfHourToday } from '../../lib/visitTime'
 import {
   istDate,
   loadWeekEvents,
@@ -109,7 +110,15 @@ function getWarnings(
   return [...new Set(warnings)]
 }
 
-export default function RoutePage({ userId }: { userId: string }) {
+export default function RoutePage({
+  userId,
+  workStart,
+  workEnd
+}: {
+  userId: string
+  workStart?: string | null
+  workEnd?: string | null
+}) {
   const [sub, setSub] = useState<'route' | 'followups'>('route')
   const [visits, setVisits] = useState<RouteVisit[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -119,6 +128,7 @@ export default function RoutePage({ userId }: { userId: string }) {
   const [adding, setAdding] = useState(false)
   const [custId, setCustId] = useState('')
   const [time, setTime] = useState('')
+  const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
 
@@ -202,9 +212,21 @@ export default function RoutePage({ userId }: { userId: string }) {
       return
     }
 
-    const plannedStart = time
-      ? `${today}T${time}:00+05:30`
-      : new Date().toISOString()
+    // A planned time is required. Never fall back to "now" silently (C10).
+    if (!isValidClock(time)) {
+      setMsg('Choose a planned time for this visit.')
+      return
+    }
+
+    const plannedStart = buildPlannedStart(today, time)
+
+    if (!plannedStart) {
+      setMsg('Please enter a valid time.')
+      return
+    }
+
+    if (saving) return
+    setSaving(true)
 
     const { error } = await supabase.from('visits').insert({
       user_id: userId,
@@ -212,6 +234,8 @@ export default function RoutePage({ userId }: { userId: string }) {
       planned_start: plannedStart,
       status: 'planned'
     })
+
+    setSaving(false)
 
     if (error) {
       setMsg('Could not add stop: ' + error.message)
@@ -248,6 +272,8 @@ export default function RoutePage({ userId }: { userId: string }) {
       <VisitDetail
         userId={userId}
         visit={selectedVisit}
+        workStart={workStart}
+        workEnd={workEnd}
         onBack={() => setSelected(null)}
         onSaved={() => {
           setSelected(null)
@@ -380,9 +406,10 @@ export default function RoutePage({ userId }: { userId: string }) {
               </label>
 
               <label>
-                Planned time (optional)
+                Planned time
                 <input
                   type="time"
+                  required
                   value={time}
                   onChange={event => setTime(event.target.value)}
                 />
@@ -396,8 +423,8 @@ export default function RoutePage({ userId }: { userId: string }) {
 
               {msg && <p className="msg">{msg}</p>}
 
-              <button className="primary" onClick={addStop}>
-                Add to today
+              <button className="primary" disabled={saving} onClick={addStop}>
+                {saving ? 'Saving…' : 'Add to today'}
               </button>
               <button
                 className="link"
@@ -414,6 +441,7 @@ export default function RoutePage({ userId }: { userId: string }) {
               className="primary"
               onClick={() => {
                 setAdding(true)
+                setTime(nextHalfHourToday())
                 setMsg('')
               }}
             >

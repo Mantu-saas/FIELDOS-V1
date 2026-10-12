@@ -38,3 +38,43 @@ test('COACH no longer treats energy 3 (Fresh) as low or shows energy out of 10',
   // an energy value printed directly as "x/10", e.g. ${s.energy}/10 or {health.energy ?? '—'}/10
   assert.doesNotMatch(src, /energy[^`\n}]{0,15}\}\/10/)
 })
+
+// ---------- C10: visit times and rescheduling ----------
+
+test('C10: ROUTE add-stop requires a time and never falls back to "now"', () => {
+  const src = read('src/features/route/RoutePage.tsx')
+  const addStop = src.slice(src.indexOf('async function addStop'), src.indexOf('async function removeStop'))
+  assert.doesNotMatch(addStop, /new Date\(\)\.toISOString\(\)/)
+  assert.match(addStop, /if \(!isValidClock\(time\)\)/)
+  assert.match(addStop, /buildPlannedStart\(today, time\)/)
+  assert.match(src, /setTime\(nextHalfHourToday\(\)\)/)
+  assert.doesNotMatch(src, /Planned time \(optional\)/)
+})
+
+test('C10: rescheduling uses the working-hours default and also serves "Rescheduled" visits', () => {
+  const src = read('src/features/visits/RescheduleVisit.tsx')
+  assert.match(src, /suggestRescheduleTime\(istClockOf\(iso\), hours\)/)
+  assert.doesNotMatch(src, /istClock\(/)
+  assert.match(src, /visit\.status === 'rescheduled'/)
+  // existing safeguards are kept
+  assert.match(src, /The new time must be in the future\./)
+  assert.match(src, /already has a planned visit on/)
+})
+
+test('C10: choosing "Rescheduled" leads to planning the replacement, without forcing a follow-up task', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.doesNotMatch(src, /Choose the new date in "Follow-up date" for a rescheduled visit/)
+  assert.match(src, /if \(status === 'rescheduled'\) return setPlanReplacement\(true\)/)
+  assert.match(src, /visit\.status === 'rescheduled'\) && \(\s*<RescheduleVisit/)
+})
+
+test('C10: "Change time" updates only planned_start of this planned visit and confirms one row', () => {
+  const src = read('src/features/visits/ChangeVisitTime.tsx')
+  assert.match(src, /\.update\(\{ planned_start: plannedStart \}\)/)
+  for (const f of [`.eq('id', visit.id)`, `.eq('user_id', userId)`, `.eq('customer_id', visit.customer_id)`, `.eq('status', 'planned')`]) {
+    assert.ok(src.includes(f), f)
+  }
+  assert.match(src, /result\.data\.length !== 1/)
+  assert.doesNotMatch(src, /\.delete\(|\.insert\(/)
+  assert.match(read('src/features/visits/VisitDetail.tsx'), /<ChangeVisitTime userId=\{userId\} visit=\{visit\}/)
+})
