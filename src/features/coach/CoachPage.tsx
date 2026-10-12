@@ -7,6 +7,15 @@ import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
 import { activeSalesTotal, energyLabel, isCancelledVisit, isLowEnergy, isPendingVisit, validStressScore, visitSaleLabel, visitSaleStates } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
 import { buildNextMove } from '../../lib/coachRules'
+import {
+  clockText,
+  homePlanText,
+  parseQuestionTime,
+  planAroundCommitments,
+  suggestCustomers,
+  todayPriorities,
+} from '../../lib/coachPlan'
+import type { CustomerFacts, HomePlan, PlanCommitment, PriorityItem } from '../../lib/coachPlan'
 
 type CoachPageProps = {
   userId: string
@@ -96,6 +105,9 @@ const IST = 'Asia/Kolkata'
 // Planning assumption used ONLY when the user gives hours available.
 // FieldOS does not store visit durations or live travel times.
 const ASSUMED_MINUTES_PER_VISIT = 60
+
+// How far back COACH looks for each customer's last completed visit
+const LOOK_BACK_DAYS = 90
 
 function addDays(date: string, n: number): string {
   const [y, m, d] = date.split('-').map(Number)
@@ -252,6 +264,8 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
   const [visitSaleState, setVisitSaleState] = useState<Record<string, VisitSaleState>>({})
   const [customers, setCustomers] = useState<Customer[]>([])
   const [personalEvents, setPersonalEvents] = useState<PersonalEvent[]>([])
+  // customer id -> India date of the last completed visit in the look-back window
+  const [lastVisit, setLastVisit] = useState<Record<string, string>>({})
 
   /* ---------------- data loading ---------------- */
 
@@ -270,6 +284,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       salesResult,
       customersResult,
       eventsResult,
+      recentVisitsResult,
     ] = await Promise.all([
       supabase
         .from('health_checkins')
@@ -320,6 +335,17 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
         .gte('starts_at', `${today}T00:00:00+05:30`)
         .lt('starts_at', `${dayAfterTomorrow}T00:00:00+05:30`)
         .order('starts_at', { ascending: true }),
+
+      // This user's completed visits in the look-back window: when each customer was last seen
+      supabase
+        .from('visits')
+        .select('customer_id, planned_start, actual_start')
+        .eq('user_id', userId)
+        .eq('status', 'visited')
+        .gte('planned_start', `${addDays(today, -LOOK_BACK_DAYS)}T00:00:00+05:30`)
+        .lt('planned_start', `${tomorrow}T00:00:00+05:30`)
+        .order('planned_start', { ascending: false })
+        .limit(2000),
     ])
 
     const firstError =
@@ -346,10 +372,20 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     setSales((salesResult.data || []) as Sale[])
     setCustomers((customersResult.data || []) as Customer[])
     setPersonalEvents((eventsResult.data || []) as PersonalEvent[])
+
+    const latest: Record<string, string> = {}
+    for (const row of (recentVisitsResult.data || []) as { customer_id: string; planned_start: string | null; actual_start: string | null }[]) {
+      const day = istDate(row.actual_start || row.planned_start)
+      if (day && (!latest[row.customer_id] || day > latest[row.customer_id])) latest[row.customer_id] = day
+    }
+    setLastVisit(latest)
+
     if (eventsResult.error) {
       setError(`Personal events could not be loaded: ${eventsResult.error.message}`)
     } else if (visitSales.error) {
       setError(`Could not check whether sales entered on visits still count: ${visitSales.error}`)
+    } else if (recentVisitsResult.error) {
+      setError(`Recent visit history could not be loaded, so "last visited" is not shown: ${recentVisitsResult.error.message}`)
     }
 
     setLoading(false)
@@ -395,6 +431,103 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
   function valueText(n: number) {
     return n > 0 ? ` — expected ${inr(Number(n))}` : ''
+  }
+
+  /* ---------------- planning inputs (lib/coachPlan.ts) ---------------- */
+
+  // Personal events that still matter on a day: not cancelled, not completed.
+  // Times are minutes since midnight in India time; an event ending on a later day runs to midnight.
+  function commitmentsOn(day: string): PlanCommitment[] {
+    return personalEvents
+      .filter(e =>
+        istDate(e.starts_at) === day &&
+        !['cancelled', 'completed', 'complete', 'done'].includes(e.status.toLowerCase()))
+      .map(e => ({
+        title: e.title,
+        allDay: e.all_day,
+        startMin: e.all_day ? null : istMinutes(new Date(e.starts_at)),
+        endMin: e.all_day || !e.ends_at
+          ? null
+          : istDate(e.ends_at) === day ? istMinutes(new Date(e.ends_at)) : 1440,
+        location: e.location,
+      }))
+  }
+
+  // Can the remaining visits fit around personal events and home time?
+  // A time typed in a home/finish question ("home by 9:30 pm") is used instead of the profile time.
+  function homePlanFor(s: ReturnType<typeof snapshot>, tomorrow: boolean, q = ''): HomePlan {
+    const asked = /\b(home|ghar|reach\w*|finish\w*|free|leave|back)\b/.test(q) ? parseQuestionTime(q) : null
+    const visitsLeft = (tomorrow ? s.tomorrowPlanned : s.todayUpcoming)
+      .map(v => ({
+        id: v.id,
+        name: customerName(v.customer_id),
+        priority: customerById(v.customer_id)?.priority ?? null,
+        startMin: visitMinutes(v),
+      }))
+      .filter(v => v.startMin >= 0)
+    const plan = planAroundCommitments({
+      visits: visitsLeft,
+      commitments: commitmentsOn(tomorrow ? s.tomorrow : s.today),
+      homeMins: asked ? asked.mins : s.homeMins,
+      homeLabel: asked ? 'the time you gave' : 'your home time',
+      nowMins: tomorrow ? null : s.nowMins,
+    })
+    if (asked?.assumedPm) plan.notes.unshift(`I read the time you gave as ${clockText(asked.mins)}.`)
+    return plan
+  }
+
+  // What is saved about each active customer, used to rank who deserves attention
+  function customerFacts(): CustomerFacts[] {
+    return customers.map(c => ({
+      id: c.id,
+      name: c.name,
+      priority: c.priority ?? null,
+      potential: Number(c.potential_amount || 0),
+      lastVisitDate: lastVisit[c.id] ?? null,
+      monthSales: activeSalesTotal(sales.filter(x => x.customer_id === c.id)),
+      phone: c.phone,
+    }))
+  }
+
+  // Today's priorities, most important first (order explained in lib/coachPlan.ts)
+  function prioritiesFor(s: ReturnType<typeof snapshot>, plan: HomePlan): PriorityItem[] {
+    const due = [...s.overdue, ...s.dueToday]
+    const exclude = new Set<string>([
+      ...s.todayAll.filter(v => !isCancelledVisit(v)).map(v => v.customer_id),
+      ...s.open.map(f => f.customer_id),
+    ])
+    const { picks, missing } = suggestCustomers(customerFacts(), {
+      today: s.today, exclude, lookBackDays: LOOK_BACK_DAYS, money: inr,
+    })
+    const first = s.tomorrowPlanned[0]
+    return todayPriorities({
+      nowMins: s.nowMins,
+      upcoming: s.todayUpcoming.map(v => ({
+        name: customerName(v.customer_id),
+        priority: customerById(v.customer_id)?.priority ?? null,
+        startMin: visitMinutes(v),
+        nextAction: v.next_action,
+      })),
+      passed: s.todayPassed.map(v => ({ name: customerName(v.customer_id) })),
+      dueFollowUps: due.map(f => ({
+        name: customerName(f.customer_id), action: f.action, dueDate: f.due_date, value: Number(f.expected_value || 0),
+      })),
+      today: s.today,
+      suggestions: picks,
+      suggestionsMissing: missing,
+      plan,
+      tomorrowFirst: first ? { name: customerName(first.customer_id), startMin: visitMinutes(first), nextAction: first.next_action } : null,
+      tomorrowCount: s.tomorrowPlanned.length,
+      money: inr,
+    })
+  }
+
+  function commitmentLines(day: string): string {
+    return commitmentsOn(day)
+      .map(c => c.allDay || c.startMin === null
+        ? `• ${c.title} — all day\n`
+        : `• ${c.title} — ${clockText(c.startMin)}${c.endMin !== null ? ` to ${clockText(c.endMin)}` : ' (no end time saved)'}${c.location ? ` · ${c.location}` : ''}\n`)
+      .join('')
   }
 
   /* ---------------- one consistent view of the user's data ---------------- */
@@ -620,6 +753,14 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     // 9. Tomorrow (generic planning)
     if (wantsTomorrow(q)) return 'tomorrow'
 
+    // 9b. Person-first day plan: "what should I do today / now / first", "most important thing"
+    if (
+      /\bwhat (should|can|do|must) i do\b(?! next)/.test(q) ||
+      /\bmost important\b|\bwhat first\b|\bwhere (do|should) i start\b/.test(q)
+    ) {
+      return 'today'
+    }
+
     // 10. Improve — make the day more useful, productivity, better use of time, finishing well
     if (
       /\buseful\w*|\bproductiv\w*|\bbetter\b|\bimprov\w*|\bwast\w*|\befficien\w*/.test(q) ||
@@ -642,28 +783,45 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
   /* ---------------- answer builders ---------------- */
 
+  // Person-first: the most important thing today, why, the next step, then the rest in order
   function buildOverviewAnswer(prefix?: string) {
     const s = snapshot()
+    const plan = homePlanFor(s, false)
+    const [top, ...rest] = prioritiesFor(s, plan)
     let r = prefix ? prefix + '\n\n' : ''
-    r += 'TODAY AT A GLANCE\n\n'
-    r += `Visits still ahead: ${s.todayUpcoming.length}\n`
-    r += `Visits completed: ${s.todayDone.length}\n`
-    r += `Follow-ups due or overdue: ${s.overdue.length + s.dueToday.length}\n`
-    r += `Sales recorded today: ${inr(s.todaySales)}\n`
-    if (s.target > 0) r += `Month so far: ${inr(s.mtd)} of ${inr(s.target)}\n`
 
-    const urgent = [...s.overdue, ...s.dueToday][0]
-    const next = s.todayUpcoming[0]
-    if (next) {
-      r += `\nNext: ${customerName(next.customer_id)} at ${visitClock(next)}.`
-    } else if (urgent) {
-      r += `\nNext: ${customerName(urgent.customer_id)} — ${urgent.action}.`
-    } else {
-      r += '\nNothing is scheduled or due. Ask me who to visit or what to do tomorrow.'
+    r += "TODAY'S MOST IMPORTANT THING\n"
+    r += `Priority: ${top.priority}\n`
+    r += `Reason: ${top.reason}\n`
+    r += `Action: ${top.action}\n`
+
+    if (rest.length > 0) {
+      r += '\nNEXT PRIORITIES\n'
+      rest.slice(0, 4).forEach((it, i) => { r += `${i + 2}. ${it.priority} — ${it.reason}. ${it.action}\n` })
     }
+
+    const constraints: string[] = []
+    const events = commitmentLines(s.today)
+    if (events) constraints.push('Personal commitments today:\n' + events.trimEnd())
+    if (plan.mustReach) {
+      constraints.push(plan.mustReach.kind === 'event'
+        ? `You need to reach ${plan.mustReach.label} by ${clockText(plan.mustReach.mins)}.`
+        : `Home time: ${clockText(plan.mustReach.mins)}.`)
+    }
+    plan.warnings.forEach(w => constraints.push(w))
+    plan.notes.forEach(n => constraints.push(n))
+    r += '\nCONSTRAINTS\n'
+    r += constraints.length > 0
+      ? constraints.map(c => (c.startsWith('Personal') ? c : `• ${c}`)).join('\n') + '\n'
+      : '• None in your saved data. Travel time is not saved in FieldOS.\n'
+
+    r += '\nTODAY AT A GLANCE\n'
+    r += `Visits ahead: ${s.todayUpcoming.length} · Completed: ${s.todayDone.length} · Follow-ups due or overdue: ${s.overdue.length + s.dueToday.length} · Sales today: ${inr(s.todaySales)}`
+    if (s.target > 0) r += ` · Month: ${inr(s.mtd)} of ${inr(s.target)}`
+    r += '\n'
     r += energyNote(s)
     if (prefix) {
-      r += '\nTry asking: "Who should I visit next?", "Can I get home on time?", "How am I against target?" or "How can I reduce travel?"'
+      r += '\nTry asking: "Who should I visit tomorrow?", "Can I get home by 9:30 pm?", "I am behind my target. What is the best next action?" or "Which follow-up matters most?"'
     }
     return r
   }
@@ -774,106 +932,43 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     return r
   }
 
+  // Home time and personal commitments against the remaining visits (lib/coachPlan.ts)
   function buildScheduleAnswer(q: string) {
     const s = snapshot()
     const tomorrow = wantsTomorrow(q)
     const day = tomorrow ? s.tomorrow : s.today
-    const list = tomorrow ? s.tomorrowPlanned : s.todayPlanned
-    const events = s.eventsOn(day)
     const cancelOrLate = /\b(cancel(led|ed)?|postpone[d]?|running late|late for|delayed?|no show|did not turn up)\b/.test(q)
+    const plan = homePlanFor(s, tomorrow, q)
 
-    let r = tomorrow ? 'TOMORROW — SCHEDULE AND HOME TIME\n\n' : 'TODAY — SCHEDULE AND HOME TIME\n\n'
+    let r = tomorrow ? 'TOMORROW — PLAN AND HOME TIME\n\n' : 'TODAY — PLAN AND HOME TIME\n\n'
 
-    if (s.homeMins !== null) {
-      r += `Preferred home time: ${fmtClock(s.homeMins)}.`
-      if (!tomorrow && health?.home_time_status === 'late') r += ' Your check-in says you expect to be late.'
-      r += '\n\n'
-    } else {
-      r += 'No preferred home time is saved in your profile, so I cannot check the day against it.\n\n'
-    }
+    const events = commitmentLines(day)
+    if (events) r += `PERSONAL COMMITMENTS\n${events}\n`
+    if (!tomorrow && health?.home_time_status === 'late') r += 'Your check-in says you expect to be late today.\n\n'
 
-    if (list.length === 0) {
-      r += `No planned visits found for ${tomorrow ? 'tomorrow' : 'today'}.\n`
-    } else {
-      r += `Planned visits (${list.length}):\n`
+    const list = tomorrow ? s.tomorrowPlanned : s.todayUpcoming
+    if (list.length > 0) {
+      r += `${tomorrow ? 'Planned visits' : 'Visits still ahead'} (${list.length}):\n`
       list.forEach((v, i) => {
         const c = customerById(v.customer_id)
-        const passed = !tomorrow && visitMinutes(v) < s.nowMins - 15
-        r += `${i + 1}. ${visitClock(v)} — ${customerName(v.customer_id)}${c ? ` (priority ${c.priority})` : ''}${passed ? ' — time has passed, no result recorded' : ''}\n`
+        r += `${i + 1}. ${visitClock(v)} — ${customerName(v.customer_id)}${c ? ` (priority ${c.priority})` : ''}\n`
       })
-    }
-
-    const timedEvents = events.filter(e => !e.all_day)
-    if (events.length > 0) {
-      r += '\nPersonal events:\n'
-      events.forEach(e => {
-        r += e.all_day
-          ? `• ${e.title} — all day\n`
-          : `• ${e.title} — ${eventClock(e.starts_at)}${e.ends_at ? ` to ${eventClock(e.ends_at)}` : ''}${e.location ? ` · ${e.location}` : ''}\n`
-      })
-    }
-
-    // Conflicts between a visit and a personal event with a known end time
-    const conflicts: string[] = []
-    list.forEach(v => {
-      const vm = visitMinutes(v)
-      timedEvents.forEach(e => {
-        if (!e.ends_at) return
-        const es = istMinutes(new Date(e.starts_at))
-        const ee = istMinutes(new Date(e.ends_at))
-        if (vm >= es && vm < ee) conflicts.push(`${customerName(v.customer_id)} at ${visitClock(v)} falls inside "${e.title}"`)
-      })
-    })
-    if (conflicts.length > 0) {
-      r += `\nCONFLICT\n${conflicts.join('\n')}\nMove or call about the visit.\n`
-    }
-
-    // Time check against the next fixed point: a later personal event, otherwise home time
-    const upcoming = tomorrow ? list : s.todayUpcoming
-    const lastVisit = upcoming[upcoming.length - 1]
-    if (lastVisit) {
-      const lastStart = visitMinutes(lastVisit)
-      const laterEvent = timedEvents.find(e => istMinutes(new Date(e.starts_at)) > lastStart)
-      const eventStart = laterEvent ? istMinutes(new Date(laterEvent.starts_at)) : null
-      // Use whichever fixed point comes first: home time or the later personal event
-      const useEvent = eventStart !== null && (s.homeMins === null || eventStart <= s.homeMins)
-      const anchor: number | null = useEvent ? eventStart : s.homeMins
-      const anchorLabel = useEvent && laterEvent
-        ? `"${laterEvent.title}" (${fmtClock(eventStart as number)})`
-        : s.homeMins !== null
-          ? `your home time (${fmtClock(s.homeMins)})`
-          : ''
-      r += '\nTIME CHECK\n'
-      if (anchor !== null && anchorLabel) {
-        const buffer = anchor - lastStart
-        r += `Your last visit (${customerName(lastVisit.customer_id)}) starts at ${visitClock(lastVisit)}, which leaves ${buffer > 0 ? fmtDuration(buffer) : 'no time'} before ${anchorLabel}. `
-        r += 'That must cover the visit, travel and getting ready. FieldOS has no saved visit durations or live travel times, so I cannot confirm it fits.\n'
-        if (buffer <= 0) {
-          r += 'RESULT: the last visit starts after that time. Do not keep it unless you are willing to be late.\n'
-        } else if (buffer < 90) {
-          r += 'RESULT: tight (under 90 minutes is my rule of thumb, not a measured value). Keep that visit short or move it.\n'
-        } else {
-          r += 'RESULT: there is room on paper. Re-check if an earlier visit runs over.\n'
-        }
-      } else {
-        r += `Your last visit starts at ${visitClock(lastVisit)}. Set a preferred home time in your profile and I can check it.\n`
-      }
-    }
-
-    if ((cancelOrLate || list.length >= 3) && list.length >= 2) {
-      const lowest = list
-        .map(v => ({ v, p: priorityOf(v.customer_id) }))
-        .filter(x => x.p !== 999)
-        .sort((a, b) => b.p - a.p)[0]
-      r += cancelOrLate ? '\nIF A VISIT FALLS AWAY OR YOU ARE LATE\n' : '\nIF YOU START RUNNING LATE\n'
-      if (lowest) {
-        r += `Call ${customerName(lowest.v.customer_id)} first (priority ${lowest.p}, the lowest in today's list) and agree a new time. `
-      }
-      const topFollowUp = [...s.overdue, ...s.dueToday][0]
-      if (cancelOrLate && topFollowUp) {
-        r += `Use any freed time to call ${customerName(topFollowUp.customer_id)} about "${topFollowUp.action}".`
-      }
       r += '\n'
+    }
+
+    r += homePlanText(plan)
+
+    if (!tomorrow && s.todayPassed.length > 0) {
+      r += `\nNOT YET RECORDED\n${listNames(s.todayPassed.map(v => customerName(v.customer_id)))} ${s.todayPassed.length === 1 ? 'was' : 'were'} planned earlier with no result saved. Record ${s.todayPassed.length === 1 ? 'it' : 'them'} in ROUTE so this plan stays accurate.\n`
+    }
+
+    if (cancelOrLate && !tomorrow) {
+      r += '\nIF A CUSTOMER CANCELLED OR YOU ARE RUNNING LATE\n'
+      r += 'Mark the visit as Cancelled (or move it) in ROUTE, so it is not counted as work.\n'
+      const useTime = prioritiesFor(s, plan).find(it => /^(Follow up|Contact)/.test(it.priority))
+      r += useTime
+        ? `Best use of the freed time: ${useTime.priority} — ${useTime.reason}. ${useTime.action}\n`
+        : 'Nothing valuable is waiting for a call. Use the time to record outcomes or plan tomorrow.\n'
     }
 
     if (!tomorrow) r += energyNote(s)
@@ -916,13 +1011,15 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     r += '\nCOACH PRIORITY\n'
     const itemCount = s.tomorrowPlanned.length + carried.length
     if (s.tomorrowPlanned.length === 0 && carried.length === 0) {
-      const top = customers
-        .slice()
-        .sort((a, b) => a.priority - b.priority || Number(b.potential_amount || 0) - Number(a.potential_amount || 0))
-        .slice(0, 3)
-      r += top.length > 0
-        ? `Tomorrow is open. Fill it with your top-priority customers: ${listNames(top.map(c => c.name))}. Save the visits so I can plan around them.`
-        : 'Tomorrow is open and I have no customers to suggest. Add customers or visits first.'
+      const { picks, missing } = suggestCustomers(customerFacts(), {
+        today: s.today, exclude: new Set(s.open.map(f => f.customer_id)), lookBackDays: LOOK_BACK_DAYS, money: inr,
+      })
+      if (picks.length > 0) {
+        r += 'Tomorrow is open. The customers who deserve attention, on your saved data:\n'
+        picks.forEach((p, i) => { r += `${i + 1}. ${p.customer.name} — ${p.reason}. ${p.action}\n` })
+      } else {
+        r += missing ?? 'Tomorrow is open. Save the visits you plan so I can check them.'
+      }
     } else if (s.tomorrowPlanned.length >= 5 || itemCount >= 8) {
       r += 'Tomorrow is heavy. Keep the highest-priority visits, turn low-priority ones into calls and protect your home time.'
     } else if (s.heavyDay) {
@@ -935,6 +1032,14 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     if (first) {
       r += `\n\nFirst visit: ${customerName(first.customer_id)} at ${visitClock(first)}.`
       if (first.next_action) r += ` Prepare: ${first.next_action}.`
+    }
+
+    // Personal commitments tomorrow: check the visits against them now, not on the day
+    if (events.length > 0 || s.homeMins !== null) {
+      const plan = homePlanFor(s, true)
+      if (!plan.fits || plan.warnings.length > 0) {
+        r += '\n\nCOMMITMENTS CHECK\n' + homePlanText(plan)
+      }
     }
     return r
   }
@@ -1114,7 +1219,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
     const day = tomorrow ? s.tomorrow : s.today
     const plannedList = tomorrow ? s.tomorrowPlanned : s.todayUpcoming
-    const doneIds = new Set(s.todayDone.map(v => v.customer_id))
+    const doneIds = new Set<string>(s.todayDone.map(v => v.customer_id))
     const dueFollowUps = s.open
       .filter(f => f.due_date <= day)
       .sort((a, b) => Number(b.expected_value || 0) - Number(a.expected_value || 0) || a.due_date.localeCompare(b.due_date))
@@ -1137,14 +1242,14 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     dueFollowUps.forEach(f =>
       add(f.customer_id, `follow-up "${f.action}" ${f.due_date < s.today ? 'overdue since' : 'due'} ${f.due_date}${valueText(f.expected_value)}`)
     )
-    customers
-      .filter(c => !doneIds.has(c.id))
-      .slice()
-      .sort((a, b) => a.priority - b.priority || Number(b.potential_amount || 0) - Number(a.potential_amount || 0))
-      .forEach(c => add(c.id, `priority ${c.priority}${c.potential_amount > 0 ? `, potential ${inr(Number(c.potential_amount))}` : ''}, nothing planned`))
+    // Customers with nothing planned, ranked on saved evidence (priority, potential, last visit)
+    const ranked = suggestCustomers(customerFacts(), {
+      today: s.today, exclude: new Set<string>([...doneIds, ...seen]), lookBackDays: LOOK_BACK_DAYS, money: inr, max: 4,
+    })
+    ranked.picks.forEach(p => add(p.customer.id, `${p.reason}; nothing planned`))
 
     if (picks.length === 0) {
-      return 'CUSTOMER PRIORITY\n\nNo active customers, planned visits or follow-ups found. Add customers first.'
+      return 'CUSTOMER PRIORITY\n\n' + (ranked.missing ?? 'No active customers, planned visits or follow-ups found. Add customers first.')
     }
 
     let r = tomorrow ? 'WHO TO VISIT TOMORROW\n\n' : asksNext ? 'WHO TO VISIT NEXT\n\n' : 'CUSTOMER PRIORITY\n\n'
@@ -1156,7 +1261,8 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       r += '\nThen:\n'
       picks.slice(1, 4).forEach((p, i) => { r += `${i + 2}. ${customerName(p.id)} — ${p.reason}\n` })
     }
-    r += '\nOrder used: planned visits first, then due or overdue follow-ups by value, then your priority and potential numbers. It is a simple ranking of your saved data, not a prediction.'
+    r += '\nOrder used: planned visits first, then due or overdue follow-ups by value, then customers by priority, potential and time since the last visit. It is a simple ranking of your saved data, not a prediction.'
+    if (ranked.missing) r += `\n${ranked.missing}`
     if (!tomorrow) r += energyNote(s)
     return r
   }
