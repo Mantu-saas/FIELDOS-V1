@@ -43,6 +43,7 @@ export type VisitRow = {
   id: string
   customer_id: string
   planned_start: string | null
+  actual_start?: string | null
   status: string
   sale_amount: number
   lead_amount: number

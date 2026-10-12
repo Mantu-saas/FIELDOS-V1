@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
 import { buildPlannedStart, isHalfHourSlot, isValidClock, nextHalfHourToday, SLOT_MESSAGE } from '../../lib/visitTime'
+import { splitCancelledVisits, visitSaleLabel, visitSaleStates } from '../../lib/rules'
+import type { VisitSaleState } from '../../lib/rules'
+import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
 import {
   istDate,
   loadWeekEvents,
@@ -16,7 +19,7 @@ const DEFAULT_VISIT_MINUTES = 15
 const EVENT_BUFFER_MINUTES = 60
 
 const SELECT =
-  'id,customer_id,planned_start,status,sale_amount,lead_amount,collection_amount,notes,next_action,follow_up_date,customers(name,address,phone,priority)'
+  'id,customer_id,planned_start,actual_start,status,sale_amount,lead_amount,collection_amount,notes,next_action,follow_up_date,customers(name,address,phone,priority)'
 
 const LABEL: Record<string, string> = {
   planned: 'To visit',
@@ -131,6 +134,9 @@ export default function RoutePage({
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
+  // C18: whether each visit's sale still counts in SALES (shared rule in lib/rules.ts)
+  const [saleStates, setSaleStates] = useState<Record<string, VisitSaleState>>({})
+  const [visitSalesError, setVisitSalesError] = useState('')
 
   const today = todayIST()
 
@@ -160,7 +166,12 @@ export default function RoutePage({
     if (v.error) {
       setMsg("Could not load today's route: " + v.error.message)
     } else {
-      setVisits((v.data ?? []) as unknown as RouteVisit[])
+      const loaded = (v.data ?? []) as unknown as RouteVisit[]
+      // C18: load the visit sales first, then show visits and their sale status together
+      const vs = await loadVisitSales(userId, loaded)
+      setSaleStates(visitSaleStates(loaded.map(toVisitForSale), vs.rows, vs.peers))
+      setVisitSalesError(vs.error ? 'Could not check whether sales entered on visits still count: ' + vs.error : '')
+      setVisits(loaded)
     }
 
     if (c.error) {
@@ -273,11 +284,15 @@ export default function RoutePage({
 
   const selectedVisit = visits.find(visit => visit.id === selected)
 
+  // C18: a visit missing from the map (should not happen) falls back to "check SALES"
+  const saleStateOf = (visit: RouteVisit): VisitSaleState => saleStates[visit.id] ?? 'not_found'
+
   if (selectedVisit) {
     return (
       <VisitDetail
         userId={userId}
         visit={selectedVisit}
+        saleState={saleStateOf(selectedVisit)}
         workStart={workStart}
         workEnd={workEnd}
         onBack={() => setSelected(null)}
@@ -289,7 +304,11 @@ export default function RoutePage({
     )
   }
 
-  const pending = visits
+  // Cancelled visits are kept (and can still be opened to reschedule) but are not today's work:
+  // they are not numbered, not used for gaps or navigation, and are listed apart below.
+  const { active: workVisits, cancelled: cancelledVisits } = splitCancelledVisits<RouteVisit>(visits)
+
+  const pending = workVisits
     .filter(
       visit =>
         visit.status === 'planned' &&
@@ -315,7 +334,7 @@ export default function RoutePage({
           : '')
 
   function getGap(index: number): string | null {
-    const current = visits[index]
+    const current = workVisits[index]
 
     if (
       !current ||
@@ -328,7 +347,7 @@ export default function RoutePage({
     const currentStart = new Date(current.planned_start).getTime()
     if (!Number.isFinite(currentStart)) return null
 
-    const next = visits
+    const next = workVisits
       .slice(index + 1)
       .find(
         visit =>
@@ -389,6 +408,12 @@ export default function RoutePage({
           {eventsError && (
             <div className="card">
               <p className="msg">{eventsError}</p>
+            </div>
+          )}
+
+          {visitSalesError && (
+            <div className="card">
+              <p className="msg">{visitSalesError}</p>
             </div>
           )}
 
@@ -474,16 +499,20 @@ export default function RoutePage({
             <div className="card">
               <p>Loading…</p>
             </div>
-          ) : visits.length === 0 ? (
+          ) : workVisits.length === 0 ? (
             <div className="card">
-              <p>No stops for today yet. Tap "Add stop".</p>
+              <p>
+                {cancelledVisits.length > 0
+                  ? 'No active stops for today. Tap "Add stop".'
+                  : 'No stops for today yet. Tap "Add stop".'}
+              </p>
               <p className="small">
                 Stops are ordered by planned time. Automatic route
                 ordering is not enabled.
               </p>
             </div>
           ) : (
-            visits.map((visit, index) => {
+            workVisits.map((visit, index) => {
               const warnings = getWarnings(visit, events)
               const gap = getGap(index)
               const address = visit.customers?.address?.trim()
@@ -504,8 +533,8 @@ export default function RoutePage({
                     <span className="small">
                       {timeIST(visit.planned_start)} ·{' '}
                       {LABEL[visit.status] ?? visit.status}
-                      {visit.sale_amount > 0
-                        ? ' · Sale ' + inr(Number(visit.sale_amount))
+                      {Number(visit.sale_amount) > 0
+                        ? ' · ' + visitSaleLabel(saleStateOf(visit), inr(Number(visit.sale_amount)))
                         : ''}
                     </span>
 
@@ -559,6 +588,28 @@ export default function RoutePage({
                 </div>
               )
             })
+          )}
+
+          {!loading && cancelledVisits.length > 0 && (
+            <div className="card">
+              <h2>Cancelled today ({cancelledVisits.length})</h2>
+              <p className="small">
+                Not part of today's work. Kept for your history; tap one to reschedule it.
+              </p>
+              {cancelledVisits.map(visit => (
+                <div
+                  key={visit.id}
+                  className="line"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setSelected(visit.id)}
+                >
+                  <span className="cancelled-text">
+                    {visit.customers?.name ?? 'Customer'} · {timeIST(visit.planned_start)}
+                  </span>
+                  <span className="cancelled-label">CANCELLED</span>
+                </div>
+              ))}
+            </div>
           )}
         </>
       )}

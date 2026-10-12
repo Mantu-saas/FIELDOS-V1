@@ -3,7 +3,9 @@ import { supabase } from '../../lib/supabase'
 import type { Profile } from '../../types'
 import { inr, monthStart, todayIST } from '../../lib/format'
 import { computeTarget } from '../../lib/targetMath'
-import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit } from '../../lib/rules'
+import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
+import { activeSalesTotal, energyLabel, isCancelledVisit, isLowEnergy, isPendingVisit, validStressScore, visitSaleLabel, visitSaleStates } from '../../lib/rules'
+import type { VisitSaleState } from '../../lib/rules'
 import { buildNextMove } from '../../lib/coachRules'
 
 type CoachPageProps = {
@@ -25,6 +27,7 @@ type Visit = {
   id: string
   customer_id: string
   planned_start: string | null
+  actual_start: string | null
   status: string
   sale_amount: number
   next_action: string | null
@@ -245,6 +248,8 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
   const [visits, setVisits] = useState<Visit[]>([])
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [sales, setSales] = useState<Sale[]>([])
+  // C18: whether each visit's sale still counts in SALES (looked up by the visit's recording date)
+  const [visitSaleState, setVisitSaleState] = useState<Record<string, VisitSaleState>>({})
   const [customers, setCustomers] = useState<Customer[]>([])
   const [personalEvents, setPersonalEvents] = useState<PersonalEvent[]>([])
 
@@ -275,7 +280,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
       supabase
         .from('visits')
-        .select('id, customer_id, planned_start, status, sale_amount, next_action')
+        .select('id, customer_id, planned_start, actual_start, status, sale_amount, next_action')
         .eq('user_id', userId)
         .gte('planned_start', `${today}T00:00:00+05:30`)
         .lt('planned_start', `${dayAfterTomorrow}T00:00:00+05:30`)
@@ -330,14 +335,21 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       return
     }
 
+    // C18: sales behind visit sales, by recording date (may be before this month), scoped to this user
+    const loadedVisits = (visitsResult.data || []) as Visit[]
+    const visitSales = await loadVisitSales(userId, loadedVisits)
+
     setHealth(healthResult.data)
-    setVisits((visitsResult.data || []) as Visit[])
+    setVisits(loadedVisits)
+    setVisitSaleState(visitSaleStates(loadedVisits.map(toVisitForSale), visitSales.rows, visitSales.peers))
     setFollowUps((followUpsResult.data || []) as FollowUp[])
     setSales((salesResult.data || []) as Sale[])
     setCustomers((customersResult.data || []) as Customer[])
     setPersonalEvents((eventsResult.data || []) as PersonalEvent[])
     if (eventsResult.error) {
       setError(`Personal events could not be loaded: ${eventsResult.error.message}`)
+    } else if (visitSales.error) {
+      setError(`Could not check whether sales entered on visits still count: ${visitSales.error}`)
     }
 
     setLoading(false)
@@ -401,6 +413,8 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     const todayPlanned = todayAll.filter(isPlannedVisit)
     const tomorrowPlanned = tomorrowAll.filter(isPlannedVisit)
     const todayDone = todayAll.filter(v => v.status === 'visited')
+    // Today's work: every visit except cancelled ones (cancelled are kept only as history)
+    const todayActive = todayAll.filter(v => !isCancelledVisit(v))
     // A visit that started up to 15 minutes ago still counts as "ahead"
     const todayUpcoming = todayPlanned.filter(v => visitMinutes(v) >= nowMins - 15)
     const todayPassed = todayPlanned.filter(v => visitMinutes(v) < nowMins - 15)
@@ -437,7 +451,8 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
     const minsToHome = homeMins !== null && homeMins > nowMins ? homeMins - nowMins : null
 
     const energy = health?.energy ?? null
-    const stress = health?.stress ?? null
+    // Only a real 1-10 score counts; HEALTH does not ask about stress (see validStressScore)
+    const stress = validStressScore(health?.stress)
     const heavyDay =
       health?.day_weight === 'heavy' ||
       health?.home_time_status === 'late' ||
@@ -445,7 +460,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
     return {
       today, tomorrow, nowMins,
-      todayAll, tomorrowAll, todayPlanned, tomorrowPlanned, todayDone, todayUpcoming, todayPassed,
+      todayAll, todayActive, tomorrowAll, todayPlanned, tomorrowPlanned, todayDone, todayUpcoming, todayPassed,
       overdue, dueToday, dueTomorrow, dueLater, open,
       eventsOn,
       mtd, todaySales, target, remaining, daysLeft, daysElapsed, required, avg, paceKnown,
@@ -949,7 +964,12 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       v => !['planned', 'visited', 'unavailable', 'rescheduled', 'cancelled'].includes(v.status)
     )
 
-    const sale = (v: Visit) => (Number(v.sale_amount) > 0 ? ` — Sale ${inr(Number(v.sale_amount))}` : '')
+    // C18: shared rule; a sale cancelled in SALES is never shown as if it still counts,
+    // and an uncertain match says "check SALES"
+    const sale = (v: Visit) =>
+      Number(v.sale_amount) > 0
+        ? ` — ${visitSaleLabel(visitSaleState[v.id] ?? 'not_found', inr(Number(v.sale_amount)))}`
+        : ''
     const line = (v: Visit) => `• ${customerName(v.customer_id)}`
     const section = (title: string, rows: string[]) =>
       `${title} (${rows.length})\n` + (rows.length > 0 ? rows.join('\n') : 'None') + '\n\n'
@@ -1241,7 +1261,9 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       return r + 'No health check-in is saved for today. Complete it in the HEALTH tab and I will adjust today\'s plan to it.'
     }
 
-    r += `Energy: ${energyLabel(s.energy)} · Stress ${s.stress ?? '—'}/10 · Sleep ${health.sleep_hours ?? '—'} hours`
+    r += `Energy: ${energyLabel(s.energy)}`
+    if (s.stress !== null) r += ` · Stress ${s.stress}/10`
+    r += ` · Sleep ${health.sleep_hours ?? '—'} hours`
     if (health.day_weight) r += ` · Day: ${health.day_weight}`
     if (health.home_time_status) r += ` · Home time: ${health.home_time_status}`
     r += '\n'
@@ -1392,7 +1414,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       const bits: string[] = []
       if (s.energy !== null) bits.push(`energy ${energyLabel(s.energy)}`)
       if (s.stress !== null) bits.push(`stress ${s.stress}/10`)
-      r += bits.length > 0 ? `Check-in today: ${bits.join(', ')}.\n` : 'Check-in today is saved but has no energy or stress score.\n'
+      r += bits.length > 0 ? `Check-in today: ${bits.join(', ')}.\n` : 'Check-in today is saved but has no energy level.\n'
     } else {
       r += 'No health check-in saved today.\n'
     }
@@ -1480,7 +1502,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
         health,
         today: s.today,
         tomorrow: s.tomorrow,
-        today_visits: s.todayAll.length,
+        today_visits: s.todayActive.length,
         today_planned_ahead: s.todayUpcoming.length,
         tomorrow_visits: s.tomorrowPlanned.length,
         follow_ups_overdue: s.overdue.length,
@@ -1564,7 +1586,9 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
         {health ? (
           <>
             <p>Energy: <strong>{energyLabel(health.energy)}</strong></p>
-            <p>Stress: <strong>{health.stress ?? '—'}/10</strong></p>
+            {validStressScore(health.stress) !== null && (
+              <p>Stress: <strong>{validStressScore(health.stress)}/10</strong></p>
+            )}
             <p>Sleep: <strong>{health.sleep_hours ?? '—'} hours</strong></p>
             <p>Day weight: <strong>{health.day_weight ?? '—'}</strong></p>
             <p>Home time: <strong>{health.home_time_status ?? '—'}</strong></p>
@@ -1581,7 +1605,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
       <div className="card">
         <h3>REVENUE & WORK</h3>
-        <p>Today's visits: <strong>{view.todayAll.length}</strong></p>
+        <p>Today's visits: <strong>{view.todayActive.length}</strong></p>
         <p>Tomorrow's planned visits: <strong>{view.tomorrowPlanned.length}</strong></p>
         <p>Completed visits today: <strong>{view.todayDone.length}</strong></p>
         <p>Follow-ups due/overdue: <strong>{view.overdue.length + view.dueToday.length}</strong></p>

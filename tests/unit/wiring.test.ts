@@ -109,3 +109,144 @@ test('C17: no database rule or migration was added (existing records untouched)'
   const files = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
   assert.ok(!files.some(f => /slot|half.?hour|interval/i.test(f)), files.join(', '))
 })
+
+test('C18: visit-sale query is scoped to this user, visit-created sales, customers and recording dates', () => {
+  const src = read('src/lib/visitSales.ts')
+  assert.match(src, /\.from\('sales'\)/)
+  assert.match(src, /\.eq\('user_id', userId\)/)
+  assert.match(src, /\.eq\('notes', VISIT_SALE_NOTE\)/)
+  assert.match(src, /\.in\('customer_id', customerIds\)/)
+  assert.match(src, /\.in\('sale_date', dates\)/)
+  assert.match(src, /istDateOf\(v\.actual_start\)/)
+  assert.doesNotMatch(src, /monthStart/)
+})
+
+test('C18: duplicate-visit count is loaded from the database, scoped like the sales', () => {
+  const src = read('src/lib/visitSales.ts')
+  const peers = src.slice(src.indexOf(".from('visits')"))
+  assert.match(peers, /\.select\('id,customer_id,sale_amount,actual_start'\)/)
+  assert.match(peers, /\.eq\('user_id', userId\)/)
+  assert.match(peers, /\.in\('customer_id', customerIds\)/)
+  assert.match(peers, /\.gt\('sale_amount', 0\)/)
+  assert.match(peers, /\.gte\('actual_start', from\)/)
+  assert.match(peers, /\.lt\('actual_start', to\)/)
+  // a failure of either query means no status is claimed
+  assert.match(src, /if \(error\) return \{ rows: null, peers: null, error \}/)
+  for (const file of ['src/features/route/RoutePage.tsx', 'src/features/coach/CoachPage.tsx']) {
+    assert.match(read(file), /visitSaleStates\([^)]*\), [a-zA-Z]+\.rows, [a-zA-Z]+\.peers\)/, file)
+  }
+})
+
+test('C18: visit detail writes the same note the matching rule looks for', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.match(src, /notes: VISIT_SALE_NOTE/)
+  assert.doesNotMatch(src, /notes: 'From visit'/)
+})
+
+test('C18: visit sale date and actual_start come from the same moment (midnight-safe)', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.match(src, /const now = new Date\(\)\.toISOString\(\)/)
+  assert.match(src, /actual_start: now/)
+  assert.match(src, /const saleDate = istDateOf\(now\)/)
+  assert.match(src, /sale_date: saleDate/)
+  assert.doesNotMatch(src, /sale_date: today/)
+})
+
+test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared rule', () => {
+  const route = read('src/features/route/RoutePage.tsx')
+  assert.match(route, /actual_start/)
+  assert.match(route, /loadVisitSales\(userId, loaded\)/)
+  assert.match(route, /visitSaleStates\(/)
+  assert.match(route, /visitSalesError/)
+  assert.match(route, /visitSaleLabel\(saleStateOf\(visit\)/)
+  assert.match(route, /saleState=\{saleStateOf\(selectedVisit\)\}/)
+  assert.doesNotMatch(route, /' · Sale ' \+ inr/)
+
+  const detail = read('src/features/visits/VisitDetail.tsx')
+  assert.match(detail, /visitSaleLabel\(saleState \?\? 'not_found'/)
+  assert.doesNotMatch(detail, /<b>Sale:<\/b> \{inr\(Number\(visit\.sale_amount\)\)\}/)
+
+  const coach = read('src/features/coach/CoachPage.tsx')
+  assert.match(coach, /select\('id, customer_id, planned_start, actual_start, status, sale_amount, next_action'\)/)
+  assert.match(coach, /loadVisitSales\(userId, loadedVisits\)/)
+  assert.match(coach, /visitSaleLabel\(visitSaleState\[v\.id\] \?\? 'not_found'/)
+  assert.doesNotMatch(coach, /` — Sale \$\{inr\(Number\(v\.sale_amount\)\)\}`/)
+})
+
+// ---------------- Fix A: cancelled visits ----------------
+
+test('Fix A: ROUTE numbers, gaps and navigation use only active visits; cancelled are listed apart', () => {
+  const src = read('src/features/route/RoutePage.tsx')
+  assert.match(src, /splitCancelledVisits<RouteVisit>\(visits\)/)
+  assert.match(src, /workVisits\.map\(\(visit, index\)/)            // numbered list
+  assert.match(src, /const current = workVisits\[index\]/)          // time gaps
+  assert.match(src, /const next = workVisits/)
+  assert.match(src, /const pending = workVisits/)                   // Google Maps stops
+  assert.doesNotMatch(src, /\bvisits\.map\(\(visit, index\)/)
+  // cancelled visits stay visible, clearly marked, and can be opened (to reschedule)
+  assert.match(src, /Cancelled today \(\{cancelledVisits\.length\}\)/)
+  assert.match(src, /cancelledVisits\.map\(visit =>[\s\S]*?onClick=\{\(\) => setSelected\(visit\.id\)\}[\s\S]*?CANCELLED/)
+  assert.match(src, /const selectedVisit = visits\.find/)           // opening uses the full list
+  // no new deletes: cancelling never removes data
+  assert.equal((src.match(/\.delete\(\)/g) ?? []).length, 1)        // only the existing "Remove planned stop"
+})
+
+test('Fix A: COACH counts today\'s visits without cancelled ones', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  assert.match(src, /const todayActive = todayAll\.filter\(v => !isCancelledVisit\(v\)\)/)
+  assert.match(src, /Today's visits: <strong>\{view\.todayActive\.length\}/)
+  assert.match(src, /today_visits: s\.todayActive\.length/)
+  // planned counts already use the pending rule, which excludes cancelled
+  assert.match(src, /const todayPlanned = todayAll\.filter\(isPlannedVisit\)/)
+})
+
+test('Fix A: My Week shows only still-planned visits as work', () => {
+  assert.match(read('src/features/myweek/MyWeekPage.tsx'), /setPlannedVisits\(visits\.filter\(visit => visit\.status === 'planned'\)\)/)
+})
+
+// ---------------- Fix B: cancelled sales ----------------
+
+test('Fix B: SALES confirms the cancellation with the database before showing it', () => {
+  const src = read('src/features/sales/SalesView.tsx')
+  const fn = src.slice(src.indexOf('async function cancelSale'), src.indexOf('const total ='))
+  assert.match(fn, /\.update\(\{ status: 'cancelled' \}\)\s*\.eq\('id', id\)\s*\.eq\('user_id', userId\)\s*\.select\('id,status'\)/)
+  assert.match(fn, /if \(error\) \{[\s\S]*?ok: false[\s\S]*?return/)
+  assert.match(fn, /if \(!isSaleCancellationConfirmed\(data, id\)\) \{[\s\S]*?ok: false[\s\S]*?return/)
+  // the on-screen change happens only after both checks
+  assert.ok(fn.indexOf('markSaleCancelled(') > fn.indexOf('isSaleCancellationConfirmed('))
+  assert.match(fn, /if \(cancellingId\) return/)       // no double cancel
+})
+
+test('Fix B: SALES shows cancelled sales struck through in red with a CANCELLED label, and uses the shared total rule', () => {
+  const src = read('src/features/sales/SalesView.tsx')
+  assert.match(src, /className=\{cancelled \? 'cancelled-text' : undefined\}/)
+  assert.match(src, /<b className="cancelled-text">\{inr\(Number\(r\.amount\)\)\}<\/b>/)
+  assert.match(src, /<span className="cancelled-label">CANCELLED<\/span>/)
+  assert.match(src, /const total = activeSalesTotal\(rows\)/)
+  // this list only loads the signed-in salesperson's own sales
+  assert.match(src, /\.from\('sales'\)\s*\.select\([\s\S]*?\)\s*\.eq\('user_id', userId\)/)
+  const css = read('src/styles.css')
+  assert.match(css, /\.cancelled-text \{[^}]*color:#b91c1c[^}]*text-decoration:line-through/)
+})
+
+// ---------------- Fix C: stress display ----------------
+
+test('Fix C: COACH shows a stress line only when a real 1-10 score is stored', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  assert.match(src, /const stress = validStressScore\(health\?\.stress\)/)
+  // My Day card: line only rendered for a valid score; the old "—/10" fallback is gone
+  assert.match(src, /\{validStressScore\(health\.stress\) !== null && \(\s*<p>Stress: <strong>\{validStressScore\(health\.stress\)\}\/10<\/strong><\/p>/)
+  assert.doesNotMatch(src, /\?\? '—'\}\/10/)
+  assert.doesNotMatch(src, /Stress \$\{s\.stress \?\? '—'\}\/10/)
+  assert.match(src, /if \(s\.stress !== null\) r \+= ` · Stress \$\{s\.stress\}\/10`/)
+  // the rest of the wellbeing line and advice stays
+  assert.match(src, /Energy: <strong>\{energyLabel\(health\.energy\)\}<\/strong>/)
+  assert.match(src, /STRESS CHECK/)
+})
+
+test('Fix C: no new HEALTH question, scale or database column was added for stress', () => {
+  const health = read('src/features/health/HealthPage.tsx')
+  assert.doesNotMatch(health, /onClick=\{\(\) => setStress|onChange=\{[^}]*setStress/)
+  const files = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
+  assert.ok(!files.some(f => /stress/i.test(f)), files.join(', '))
+})

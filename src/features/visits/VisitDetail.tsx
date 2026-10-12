@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST } from '../../lib/format'
+import { istDateOf } from '../../lib/visitTime'
 import type { VisitRow } from '../../types'
+import { VISIT_SALE_NOTE, visitSaleLabel } from '../../lib/rules'
+import type { VisitSaleState } from '../../lib/rules'
 import RescheduleVisit from './RescheduleVisit'
 import ChangeVisitTime from './ChangeVisitTime'
 
@@ -14,7 +17,9 @@ type Pre = {
 
 const num = (s: string) => s.replace(/[^0-9.]/g, '')
 
-export default function VisitDetail({ userId, visit, onBack, onSaved, workStart, workEnd }: { userId: string; visit: VisitRow; onBack: () => void; onSaved: () => void; workStart?: string | null; workEnd?: string | null }) {
+// saleState (C18): whether the sale entered on this visit still counts in SALES. Worked out by ROUTE
+// with the shared rule in lib/rules.ts; when missing, the screen says "check SALES" instead of guessing.
+export default function VisitDetail({ userId, visit, saleState, onBack, onSaved, workStart, workEnd }: { userId: string; visit: VisitRow; saleState?: VisitSaleState; onBack: () => void; onSaved: () => void; workStart?: string | null; workEnd?: string | null }) {
   const [pre, setPre] = useState<Pre | null>(null)
   const [status, setStatus] = useState('visited')
   const [sale, setSale] = useState('')
@@ -57,6 +62,10 @@ export default function VisitDetail({ userId, visit, onBack, onSaved, workStart,
     if (fuDate && fuDate < today) return setMsg('Follow-up date cannot be in the past.')
     setBusy(true)
     const now = new Date().toISOString()
+    // C18: the sale's date comes from the SAME moment saved as actual_start, so the two always
+    // fall on the same India date. (`today` is fixed when the screen last redrew, which can be
+    // before midnight while Save is tapped after it.)
+    const saleDate = istDateOf(now) ?? todayIST()
     const u = await supabase.from('visits').update({
       status, sale_amount: saleN, lead_amount: leadN, collection_amount: collN,
       notes: notes.trim() || null, next_action: nextAction.trim() || null, follow_up_date: fuDate || null,
@@ -66,7 +75,7 @@ export default function VisitDetail({ userId, visit, onBack, onSaved, workStart,
 
     const problems: string[] = []
     if (saleN > 0) {
-      const r = await supabase.from('sales').insert({ user_id: userId, customer_id: visit.customer_id, sale_date: today, amount: saleN, notes: 'From visit' })
+      const r = await supabase.from('sales').insert({ user_id: userId, customer_id: visit.customer_id, sale_date: saleDate, amount: saleN, notes: VISIT_SALE_NOTE })
       if (r.error) problems.push('the sale (' + r.error.message + ')')
     }
     if (fuDate) {
@@ -125,7 +134,7 @@ export default function VisitDetail({ userId, visit, onBack, onSaved, workStart,
         <div className="card">
           <h2>Recorded</h2>
           <p><b>Result:</b> {visit.status}</p>
-          {visit.sale_amount > 0 && <p><b>Sale:</b> {inr(Number(visit.sale_amount))}</p>}
+          {Number(visit.sale_amount) > 0 && <p><b>{visitSaleLabel(saleState ?? 'not_found', inr(Number(visit.sale_amount)))}</b></p>}
           {visit.lead_amount > 0 && <p><b>Opportunity:</b> {inr(Number(visit.lead_amount))}</p>}
           {visit.collection_amount > 0 && <p><b>Collection:</b> {inr(Number(visit.collection_amount))}</p>}
           {visit.notes && <p><b>Note:</b> {visit.notes}</p>}

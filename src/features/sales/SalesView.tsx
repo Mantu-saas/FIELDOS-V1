@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, monthStart } from '../../lib/format'
 import type { Customer } from '../../types'
+import { activeSalesTotal, isSaleCancellationConfirmed, markSaleCancelled } from '../../lib/rules'
 
 type Row = {
   id: string
@@ -26,6 +27,9 @@ export default function SalesView({ userId }: { userId: string }) {
 
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  // Cancelling: which sale is being cancelled, and the result shown next to the list
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [listMsg, setListMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   const load = useCallback(async () => {
     const c = await supabase
@@ -43,6 +47,7 @@ export default function SalesView({ userId }: { userId: string }) {
       .select(
         'id,amount,sale_date,status,customer_id,product_category,customers(name)'
       )
+      .eq('user_id', userId)
       .gte('sale_date', monthStart(todayIST()))
       .order('sale_date', { ascending: false })
       .order('created_at', { ascending: false })
@@ -52,7 +57,7 @@ export default function SalesView({ userId }: { userId: string }) {
     } else {
       setRows((s.data ?? []) as unknown as Row[])
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => {
     load()
@@ -139,6 +144,8 @@ export default function SalesView({ userId }: { userId: string }) {
   }
 
   async function cancelSale(id: string) {
+    if (cancellingId) return
+
     if (
       !window.confirm(
         'Mark this sale as cancelled? It will stop counting toward your target.'
@@ -147,22 +154,38 @@ export default function SalesView({ userId }: { userId: string }) {
       return
     }
 
-    const { error } = await supabase
+    setCancellingId(id)
+    setListMsg(null)
+
+    // Ask the database to return the changed row, so success is only shown when it is confirmed
+    const { data, error } = await supabase
       .from('sales')
       .update({ status: 'cancelled' })
       .eq('id', id)
       .eq('user_id', userId)
+      .select('id,status')
+
+    setCancellingId(null)
 
     if (error) {
-      return setMsg('Could not cancel: ' + error.message)
+      setListMsg({ text: 'Could not cancel this sale: ' + error.message + '. Nothing was changed.', ok: false })
+      return
     }
 
+    if (!isSaleCancellationConfirmed(data, id)) {
+      setListMsg({ text: 'Could not confirm the cancellation, so nothing was changed. Please check your connection and try again.', ok: false })
+      return
+    }
+
+    // Confirmed: show it as cancelled immediately, then refresh from the database
+    setRows(previous => markSaleCancelled(previous, id))
+    if (editingId === id) resetForm()
+    setListMsg({ text: 'Sale cancelled. It no longer counts toward your total or target.', ok: true })
     await load()
   }
 
-  const total = rows
-    .filter(r => r.status !== 'cancelled')
-    .reduce((s, r) => s + Number(r.amount), 0)
+  // Same rule as TODAY, My Week and COACH: cancelled sales never count
+  const total = activeSalesTotal(rows)
 
   return (
     <div className="stack">
@@ -241,42 +264,54 @@ export default function SalesView({ userId }: { userId: string }) {
 
       <div className="card">
         <h2>This month: {inr(total)}</h2>
+        <p className="small">Cancelled sales are shown for your records and are not counted.</p>
+
+        {listMsg && (
+          <p className={listMsg.ok ? 'small' : 'msg'} role="status">{listMsg.text}</p>
+        )}
 
         {rows.length === 0 ? (
           <p>No sales recorded this month.</p>
         ) : (
-          rows.map(r => (
-            <div key={r.id} className="line">
-              <span>
-                {r.sale_date} · {r.customers?.name ?? 'No customer'}
-                {r.status === 'cancelled'
-                  ? ' (cancelled)'
-                  : ''}
-              </span>
+          rows.map(r => {
+            const cancelled = r.status === 'cancelled'
+            return (
+              <div key={r.id} className="line">
+                <span className={cancelled ? 'cancelled-text' : undefined}>
+                  {r.sale_date} · {r.customers?.name ?? 'No customer'}
+                </span>
 
-              <span>
-                <b>{inr(Number(r.amount))}</b>
+                <span>
+                  {cancelled ? (
+                    <>
+                      <b className="cancelled-text">{inr(Number(r.amount))}</b>{' '}
+                      <span className="cancelled-label">CANCELLED</span>
+                    </>
+                  ) : (
+                    <>
+                      <b>{inr(Number(r.amount))}</b>
 
-                {r.status !== 'cancelled' && (
-                  <>
-                    <button
-                      className="link small-btn"
-                      onClick={() => startEdit(r)}
-                    >
-                      Edit
-                    </button>
+                      <button
+                        className="link small-btn"
+                        disabled={cancellingId !== null}
+                        onClick={() => startEdit(r)}
+                      >
+                        Edit
+                      </button>
 
-                    <button
-                      className="link small-btn"
-                      onClick={() => cancelSale(r.id)}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                )}
-              </span>
-            </div>
-          ))
+                      <button
+                        className="link small-btn"
+                        disabled={cancellingId !== null}
+                        onClick={() => cancelSale(r.id)}
+                      >
+                        {cancellingId === r.id ? 'Cancelling…' : 'Cancel'}
+                      </button>
+                    </>
+                  )}
+                </span>
+              </div>
+            )
+          })
         )}
       </div>
     </div>

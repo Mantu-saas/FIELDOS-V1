@@ -42,3 +42,6 @@ select, textarea { display:block; width:100%; margin-top:6px; padding:12px; font
 .btn { flex:1; text-align:center; padding:12px; border-radius:12px; background:var(--emerald); color:#fff; font-weight:700; text-decoration:none; }
 .line { display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid #e2e8f0; font-size:15px; }
 .small-btn { width:auto; padding:0 0 0 10px; font-size:13px; color:#b91c1c; }
+/* Cancelled visits and sales: kept for history, never shown as live work or revenue */
+.cancelled-text { color:#b91c1c; text-decoration:line-through; }
+.cancelled-label { color:#b91c1c; font-size:12px; font-weight:800; letter-spacing:.04em; white-space:nowrap; }
