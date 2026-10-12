@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
 import { buildPlannedStart, isTimeSlot, isValidClock, nextSlotToday, SLOT_MESSAGE } from '../../lib/visitTime'
 import TimeSelect from '../../components/TimeSelect'
-import { splitCancelledVisits, visitSaleLabel, visitSaleStates } from '../../lib/rules'
+import { blocksNewStopToday, sameDayVisitMessage, splitCancelledVisits, STOP_BLOCKING_STATUSES, visitSaleLabel, visitSaleStates } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
 import { loadVisitSales, toVisitForSale } from '../../lib/visitSales'
 import {
@@ -213,14 +213,16 @@ export default function RoutePage({
       return
     }
 
+    // C20: one visit per customer per day (cancelled or unavailable visits allow another try)
+    const customerName = customers.find(customer => customer.id === custId)?.name
     if (
       visits.some(
         visit =>
           visit.customer_id === custId &&
-          visit.status === 'planned'
+          blocksNewStopToday(visit)
       )
     ) {
-      setMsg("This customer is already on today's route.")
+      setMsg(sameDayVisitMessage(customerName))
       return
     }
 
@@ -245,6 +247,31 @@ export default function RoutePage({
 
     if (saving) return
     setSaving(true)
+
+    // C20: check the database too, in case the list on screen is out of date
+    // (for example a visit recorded on another phone)
+    const existing = await supabase
+      .from('visits')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('customer_id', custId)
+      .in('status', [...STOP_BLOCKING_STATUSES])
+      .gte('planned_start', `${today}T00:00:00+05:30`)
+      .lte('planned_start', `${today}T23:59:59+05:30`)
+      .limit(1)
+
+    if (existing.error) {
+      setSaving(false)
+      setMsg('Could not check today\'s route: ' + existing.error.message + '. The stop was not added.')
+      return
+    }
+
+    if ((existing.data ?? []).length > 0) {
+      setSaving(false)
+      setMsg(sameDayVisitMessage(customerName))
+      await load()
+      return
+    }
 
     const { error } = await supabase.from('visits').insert({
       user_id: userId,

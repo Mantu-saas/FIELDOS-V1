@@ -263,3 +263,26 @@ test('Fix C: no new HEALTH question, scale or database column was added for stre
   const files = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
   assert.ok(!files.some(f => /stress/i.test(f)), files.join(', '))
 })
+
+// ---------- C20: one visit per customer per day ----------
+
+test('C20: Add stop uses the shared rule on screen AND re-checks the database before inserting', () => {
+  const src = read('src/features/route/RoutePage.tsx')
+  const addStop = src.slice(src.indexOf('async function addStop'), src.indexOf('async function removeStop'))
+  assert.match(addStop, /blocksNewStopToday\(visit\)/)
+  assert.doesNotMatch(addStop, /visit\.status === 'planned'/)       // the old planned-only check is gone
+  const recheck = addStop.search(/\.in\('status', \[\.\.\.STOP_BLOCKING_STATUSES\]\)/)
+  const insert = addStop.search(/\.from\('visits'\)\.insert\(/)
+  assert.ok(recheck > 0 && insert > 0 && recheck < insert, 'database re-check runs before the insert')
+  assert.ok(addStop.includes(".eq('user_id', userId)") && addStop.includes(".eq('customer_id', custId)"))
+  assert.match(addStop, /sameDayVisitMessage\(customerName\)/)
+  assert.match(addStop, /The stop was not added\./)              // a failed check never adds the stop
+})
+
+test('SALES: the "Sale cancelled" note is cleared when you edit or save another sale', () => {
+  const src = read('src/features/sales/SalesView.tsx')
+  const startEdit = src.slice(src.indexOf('function startEdit'), src.indexOf('async function save'))
+  const save = src.slice(src.indexOf('async function save'), src.indexOf('async function cancelSale'))
+  assert.match(startEdit, /setListMsg\(null\)/)
+  assert.match(save, /setListMsg\(null\)/)
+})

@@ -331,3 +331,24 @@ test('Fix C: only a whole number from 1 to 10 (the database range) is a stress s
     assert.equal(validStressScore(bad as number), null, String(bad))
   }
 })
+
+// ---------- C20: one visit per customer per day ----------
+import { blocksNewStopToday, sameDayVisitMessage, STOP_BLOCKING_STATUSES } from '../../src/lib/rules.ts'
+
+test('C20: a planned, visited or rescheduled visit today blocks a new stop for that customer', () => {
+  for (const status of ['planned', 'visited', 'rescheduled']) {
+    assert.equal(blocksNewStopToday({ status }), true, status)
+  }
+  assert.deepEqual([...STOP_BLOCKING_STATUSES], ['planned', 'visited', 'rescheduled'])
+})
+
+test('C20: a cancelled visit or an unavailable customer still allows another try today', () => {
+  for (const status of ['cancelled', 'unavailable']) {
+    assert.equal(blocksNewStopToday({ status }), false, status)
+  }
+})
+
+test('C20: the blocked message names the customer and says what to do', () => {
+  assert.equal(sameDayVisitMessage('Test Shop 1'), 'Test Shop 1 already has a visit today. Open it instead of adding a new stop.')
+  assert.equal(sameDayVisitMessage(undefined), 'This customer already has a visit today. Open it instead of adding a new stop.')
+})
