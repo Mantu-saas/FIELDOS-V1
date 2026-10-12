@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST } from '../../lib/format'
+import { istDateOf } from '../../lib/visitTime'
 import type { VisitRow } from '../../types'
 import { VISIT_SALE_NOTE, visitSaleLabel } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
@@ -61,6 +62,10 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
     if (fuDate && fuDate < today) return setMsg('Follow-up date cannot be in the past.')
     setBusy(true)
     const now = new Date().toISOString()
+    // C18: the sale's date comes from the SAME moment saved as actual_start, so the two always
+    // fall on the same India date. (`today` is fixed when the screen last redrew, which can be
+    // before midnight while Save is tapped after it.)
+    const saleDate = istDateOf(now) ?? todayIST()
     const u = await supabase.from('visits').update({
       status, sale_amount: saleN, lead_amount: leadN, collection_amount: collN,
       notes: notes.trim() || null, next_action: nextAction.trim() || null, follow_up_date: fuDate || null,
@@ -70,7 +75,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
 
     const problems: string[] = []
     if (saleN > 0) {
-      const r = await supabase.from('sales').insert({ user_id: userId, customer_id: visit.customer_id, sale_date: today, amount: saleN, notes: VISIT_SALE_NOTE })
+      const r = await supabase.from('sales').insert({ user_id: userId, customer_id: visit.customer_id, sale_date: saleDate, amount: saleN, notes: VISIT_SALE_NOTE })
       if (r.error) problems.push('the sale (' + r.error.message + ')')
     }
     if (fuDate) {

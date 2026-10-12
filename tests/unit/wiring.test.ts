@@ -127,6 +127,15 @@ test('C18: visit detail writes the same note the matching rule looks for', () =>
   assert.doesNotMatch(src, /notes: 'From visit'/)
 })
 
+test('C18: visit sale date and actual_start come from the same moment (midnight-safe)', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.match(src, /const now = new Date\(\)\.toISOString\(\)/)
+  assert.match(src, /actual_start: now/)
+  assert.match(src, /const saleDate = istDateOf\(now\)/)
+  assert.match(src, /sale_date: saleDate/)
+  assert.doesNotMatch(src, /sale_date: today/)
+})
+
 test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared rule', () => {
   const route = read('src/features/route/RoutePage.tsx')
   assert.match(route, /actual_start/)

@@ -6,6 +6,7 @@ import {
   isPendingVisit, energyLabel, isLowEnergy,
   visitSaleStates, visitSaleLabel, visitSaleLookup, VISIT_SALE_NOTE,
 } from '../../src/lib/rules.ts'
+import { istDateOf } from '../../src/lib/visitTime.ts'
 
 test('cancelled sales are excluded from totals; confirmed and pending count', () => {
   const sales = [
@@ -161,4 +162,40 @@ test('C18: no match, no recording date, or sales not loaded — "check SALES", n
 test('C18: visit without a sale shows nothing', () => {
   assert.equal(stateOf([v('v1', { sale_amount: 0 })], [row('confirmed')]), 'none')
   assert.equal(visitSaleLabel('none', '₹0'), '')
+})
+
+// ---------------- C18: recording date vs sale date ----------------
+// VisitDetail saves actual_start = now, and (after this fix) sale_date = istDateOf(now).
+// Before the fix sale_date used the date from the screen's last redraw, which could be the day
+// before when Save is tapped just after midnight India time.
+
+test('C18 midnight: India date flips at 18:30 UTC, so a save at 00:01 IST is dated the new day', () => {
+  assert.equal(istDateOf('2026-10-12T18:29:59.999Z'), '2026-10-12') // 11:59:59 PM IST
+  assert.equal(istDateOf('2026-10-12T18:31:00.000Z'), '2026-10-13') // 12:01 AM IST
+})
+
+test('C18 midnight: old record with sale dated the day before recording — "check SALES", never a confident status', () => {
+  const recorded = istDateOf('2026-10-12T18:31:00.000Z') // visit saved 12:01 AM on 13 Oct
+  const visits = [v('v1', { recorded_date: recorded })]
+  // the sale got 12 Oct from the screen's earlier redraw; it was later cancelled
+  assert.equal(stateOf(visits, [row('cancelled', { sale_date: '2026-10-12' })]), 'not_found')
+  assert.equal(stateOf(visits, [row('confirmed', { sale_date: '2026-10-12' })]), 'not_found')
+  // and the lookup asks only for the recording date; no guessing of a neighbouring day
+  assert.deepEqual(visitSaleLookup(visits).dates, ['2026-10-13'])
+})
+
+test('C18 midnight: with the fix, sale date and recording date come from the same moment and match', () => {
+  const now = '2026-10-12T18:31:00.000Z'
+  const visits = [v('v1', { recorded_date: istDateOf(now) })]
+  assert.equal(stateOf(visits, [row('cancelled', { sale_date: istDateOf(now) as string })]), 'cancelled')
+})
+
+test('C18 old visit with no actual_start: unknown, never shown as cancelled or counted', () => {
+  const visits = [v('v1', { recorded_date: istDateOf(null) })]
+  assert.equal(istDateOf(null), null)
+  assert.deepEqual(visitSaleLookup(visits), { customerIds: [], dates: [] })
+  // even when a cancelled visit sale exists for that customer and amount
+  assert.equal(stateOf(visits, [row('cancelled')]), 'not_found')
+  assert.notEqual(visitSaleLabel('not_found', '₹5,000'), visitSaleLabel('cancelled', '₹5,000'))
+  assert.match(visitSaleLabel('not_found', '₹5,000'), /check SALES/)
 })
