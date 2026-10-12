@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
+import { visitSaleLabel } from '../../lib/rules'
+import type { VisitSaleState } from '../../lib/rules'
 import RescheduleVisit from './RescheduleVisit'
 import ChangeVisitTime from './ChangeVisitTime'
 
@@ -14,7 +16,9 @@ type Pre = {
 
 const num = (s: string) => s.replace(/[^0-9.]/g, '')
 
-export default function VisitDetail({ userId, visit, onBack, onSaved, workStart, workEnd }: { userId: string; visit: VisitRow; onBack: () => void; onSaved: () => void; workStart?: string | null; workEnd?: string | null }) {
+// saleState (C18): whether the sale entered on this visit still counts in SALES. Worked out by ROUTE
+// with the shared rule in lib/rules.ts; when missing, the screen says "check SALES" instead of guessing.
+export default function VisitDetail({ userId, visit, saleState, onBack, onSaved, workStart, workEnd }: { userId: string; visit: VisitRow; saleState?: VisitSaleState; onBack: () => void; onSaved: () => void; workStart?: string | null; workEnd?: string | null }) {
   const [pre, setPre] = useState<Pre | null>(null)
   const [status, setStatus] = useState('visited')
   const [sale, setSale] = useState('')
@@ -125,7 +129,7 @@ export default function VisitDetail({ userId, visit, onBack, onSaved, workStart,
         <div className="card">
           <h2>Recorded</h2>
           <p><b>Result:</b> {visit.status}</p>
-          {visit.sale_amount > 0 && <p><b>Sale:</b> {inr(Number(visit.sale_amount))}</p>}
+          {Number(visit.sale_amount) > 0 && <p><b>{visitSaleLabel(saleState ?? 'not_found', inr(Number(visit.sale_amount)))}</b></p>}
           {visit.lead_amount > 0 && <p><b>Opportunity:</b> {inr(Number(visit.lead_amount))}</p>}
           {visit.collection_amount > 0 && <p><b>Collection:</b> {inr(Number(visit.collection_amount))}</p>}
           {visit.notes && <p><b>Note:</b> {visit.notes}</p>}

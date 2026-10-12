@@ -3,7 +3,8 @@ import { supabase } from '../../lib/supabase'
 import type { Profile } from '../../types'
 import { inr, monthStart, todayIST } from '../../lib/format'
 import { computeTarget } from '../../lib/targetMath'
-import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit } from '../../lib/rules'
+import { istDateOf } from '../../lib/visitTime'
+import { activeSalesTotal, energyLabel, isLowEnergy, isPendingVisit, visitSaleLabel, visitSaleState } from '../../lib/rules'
 import { buildNextMove } from '../../lib/coachRules'
 
 type CoachPageProps = {
@@ -25,6 +26,7 @@ type Visit = {
   id: string
   customer_id: string
   planned_start: string | null
+  actual_start: string | null
   status: string
   sale_amount: number
   next_action: string | null
@@ -275,7 +277,7 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
 
       supabase
         .from('visits')
-        .select('id, customer_id, planned_start, status, sale_amount, next_action')
+        .select('id, customer_id, planned_start, actual_start, status, sale_amount, next_action')
         .eq('user_id', userId)
         .gte('planned_start', `${today}T00:00:00+05:30`)
         .lt('planned_start', `${dayAfterTomorrow}T00:00:00+05:30`)
@@ -949,7 +951,12 @@ export default function CoachPage({ userId, profile }: CoachPageProps) {
       v => !['planned', 'visited', 'unavailable', 'rescheduled', 'cancelled'].includes(v.status)
     )
 
-    const sale = (v: Visit) => (Number(v.sale_amount) > 0 ? ` — Sale ${inr(Number(v.sale_amount))}` : '')
+    // C18: shared rule; a sale cancelled in SALES is never shown as if it still counts.
+    // `sales` covers this month up to today, which includes the day any of these visits was recorded.
+    const sale = (v: Visit) =>
+      Number(v.sale_amount) > 0
+        ? ` — ${visitSaleLabel(visitSaleState(v, istDateOf(v.actual_start), sales), inr(Number(v.sale_amount)))}`
+        : ''
     const line = (v: Visit) => `• ${customerName(v.customer_id)}`
     const section = (title: string, rows: string[]) =>
       `${title} (${rows.length})\n` + (rows.length > 0 ? rows.join('\n') : 'None') + '\n\n'

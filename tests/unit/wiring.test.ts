@@ -109,3 +109,23 @@ test('C17: no database rule or migration was added (existing records untouched)'
   const files = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
   assert.ok(!files.some(f => /slot|half.?hour|interval/i.test(f)), files.join(', '))
 })
+
+test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared cancelled-sale rule', () => {
+  const route = read('src/features/route/RoutePage.tsx')
+  assert.match(route, /actual_start/)
+  assert.match(route, /\.from\('sales'\)/)
+  assert.match(route, /visitSaleState\(/)
+  assert.match(route, /visitSaleLabel\(saleStateOf\(visit\)/)
+  assert.match(route, /saleState=\{saleStateOf\(selectedVisit\)\}/)
+  // the old unconditional " · Sale ₹X" text is gone
+  assert.doesNotMatch(route, /' · Sale ' \+ inr/)
+
+  const detail = read('src/features/visits/VisitDetail.tsx')
+  assert.match(detail, /visitSaleLabel\(saleState \?\? 'not_found'/)
+  assert.doesNotMatch(detail, /<b>Sale:<\/b> \{inr\(Number\(visit\.sale_amount\)\)\}/)
+
+  const coach = read('src/features/coach/CoachPage.tsx')
+  assert.match(coach, /select\('id, customer_id, planned_start, actual_start, status, sale_amount, next_action'\)/)
+  assert.match(coach, /visitSaleLabel\(visitSaleState\(v, istDateOf\(v\.actual_start\), sales\)/)
+  assert.doesNotMatch(coach, /` — Sale \$\{inr\(Number\(v\.sale_amount\)\)\}`/)
+})
