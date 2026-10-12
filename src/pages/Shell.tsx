@@ -53,7 +53,7 @@ export default function Shell({ profile }: { profile: Profile }) {
               {sub === 'customers' ? <CustomersView userId={profile.id} /> : <SalesView userId={profile.id} />}
             </div>
           )}
-          {tab === 'ROUTE' && <RoutePage userId={profile.id} />}
+          {tab === 'ROUTE' && <RoutePage userId={profile.id} workStart={profile.work_start_time} workEnd={profile.work_end_time} />}
           {tab === 'HEALTH' && <HealthPage userId={profile.id} />}
           {tab === 'COACH' && <CoachPage userId={profile.id} profile={profile} />}
           {tab === 'LIFE' && <LifePage profile={profile} />}

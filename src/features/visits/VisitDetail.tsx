@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { inr, todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
 import RescheduleVisit from './RescheduleVisit'
+import ChangeVisitTime from './ChangeVisitTime'
 
 type Pre = {
   potential: number; priority: number
@@ -13,7 +14,7 @@ type Pre = {
 
 const num = (s: string) => s.replace(/[^0-9.]/g, '')
 
-export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId: string; visit: VisitRow; onBack: () => void; onSaved: () => void }) {
+export default function VisitDetail({ userId, visit, onBack, onSaved, workStart, workEnd }: { userId: string; visit: VisitRow; onBack: () => void; onSaved: () => void; workStart?: string | null; workEnd?: string | null }) {
   const [pre, setPre] = useState<Pre | null>(null)
   const [status, setStatus] = useState('visited')
   const [sale, setSale] = useState('')
@@ -24,6 +25,8 @@ export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId
   const [fuDate, setFuDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  // C10: after saving a visit as "Rescheduled", go straight to planning the replacement visit
+  const [planReplacement, setPlanReplacement] = useState(false)
   const today = todayIST()
   const done = visit.status !== 'planned'
 
@@ -52,7 +55,6 @@ export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId
     if (![saleN, leadN, collN].every(n => Number.isFinite(n) && n >= 0)) return setMsg('Amounts must be numbers (0 or more).')
     if (status !== 'visited' && (saleN > 0 || collN > 0)) return setMsg('Sale or collection can only be recorded when the status is "Visited".')
     if (fuDate && fuDate < today) return setMsg('Follow-up date cannot be in the past.')
-    if (status === 'rescheduled' && !fuDate) return setMsg('Choose the new date in "Follow-up date" for a rescheduled visit.')
     setBusy(true)
     const now = new Date().toISOString()
     const u = await supabase.from('visits').update({
@@ -76,10 +78,25 @@ export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId
     }
     setBusy(false)
     if (problems.length) return setMsg('Visit saved, but these did not save: ' + problems.join(' and ') + '. Add them manually in SALES or Follow-ups. Do not save this visit again.')
+    if (status === 'rescheduled') return setPlanReplacement(true)
     onSaved()
   }
 
   const name = visit.customers?.name ?? 'Customer'
+
+  if (planReplacement) {
+    return (
+      <div className="stack">
+        <div className="card">
+          <h2>{name}</h2>
+          <p><b>Saved as rescheduled.</b> Now choose when the replacement visit should happen.</p>
+          <RescheduleVisit userId={userId} visit={{ ...visit, status: 'rescheduled' }} onDone={onSaved} workStart={workStart} workEnd={workEnd} />
+          <button className="link" onClick={onSaved}>Skip for now — back to route</button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="stack">
       <div className="card">
@@ -115,11 +132,13 @@ export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId
           {visit.next_action && <p><b>Next action:</b> {visit.next_action}</p>}
           {visit.follow_up_date && <p><b>Follow-up date:</b> {visit.follow_up_date}</p>}
           <p className="small">A recorded visit cannot be edited here. If something is wrong, fix the sale in SALES or the follow-up in Follow-ups.</p>
-          {(visit.status === 'unavailable' || visit.status === 'cancelled') && (
-            <RescheduleVisit userId={userId} visit={visit} onDone={onSaved} />
+          {(visit.status === 'unavailable' || visit.status === 'cancelled' || visit.status === 'rescheduled') && (
+            <RescheduleVisit userId={userId} visit={visit} onDone={onSaved} workStart={workStart} workEnd={workEnd} />
           )}
         </div>
       ) : (
+        <>
+        <ChangeVisitTime userId={userId} visit={visit} onSaved={onSaved} />
         <div className="card">
           <h2>Record visit</h2>
           <label>Result
@@ -128,6 +147,7 @@ export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId
               <option value="cancelled">Cancelled</option><option value="rescheduled">Rescheduled</option>
             </select>
           </label>
+          {status === 'rescheduled' && <p className="small">After saving, you will choose the date and time of the replacement visit.</p>}
           {status === 'visited' && <>
             <label>Sale amount (₹)<input inputMode="numeric" value={sale} onChange={e => setSale(num(e.target.value))} /></label>
             <label>Collection amount (₹, optional)<input inputMode="numeric" value={coll} onChange={e => setColl(num(e.target.value))} /></label>
@@ -139,6 +159,7 @@ export default function VisitDetail({ userId, visit, onBack, onSaved }: { userId
           {msg && <p className="msg">{msg}</p>}
           <button className="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save visit'}</button>
         </div>
+        </>
       )}
     </div>
   )
