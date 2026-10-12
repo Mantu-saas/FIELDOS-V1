@@ -5,12 +5,13 @@ import { todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
 import {
   buildPlannedStart,
-  isHalfHourSlot,
+  isTimeSlot,
   istClockOf,
   SLOT_MESSAGE,
   suggestRescheduleTime,
   workingHours
 } from '../../lib/visitTime'
+import TimeSelect from '../../components/TimeSelect'
 
 const IST = 'Asia/Kolkata'
 
@@ -194,8 +195,8 @@ export default function RescheduleVisit({
       return
     }
 
-    // C17: 30-minute slots only
-    if (!isHalfHourSlot(time)) {
+    // C19: 5-minute steps only (the picker offers only these)
+    if (!isTimeSlot(time)) {
       setMsg(SLOT_MESSAGE)
       return
     }
@@ -475,16 +476,12 @@ export default function RescheduleVisit({
             />
           </label>
 
-          <label>
-            {mode === 'move' ? 'New time' : 'Visit time'}
-            <input
-              type="time"
-              step={1800}
-              value={time}
-              disabled={busy}
-              onChange={event => setTime(event.target.value)}
-            />
-          </label>
+          <TimeSelect
+            label={mode === 'move' ? 'New time' : 'Visit time'}
+            value={time}
+            disabled={busy}
+            onChange={setTime}
+          />
 
           {msg && <p className="msg">{msg}</p>}
 

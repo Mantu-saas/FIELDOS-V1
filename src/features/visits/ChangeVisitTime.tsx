@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
-import { buildPlannedStart, isHalfHourSlot, istClockOf, istDateOf, nextDay, SLOT_MESSAGE } from '../../lib/visitTime'
+import { buildPlannedStart, isTimeSlot, istClockOf, istDateOf, nextDay, SLOT_MESSAGE } from '../../lib/visitTime'
+import TimeSelect from '../../components/TimeSelect'
 
 // C10: change the date/time of a PLANNED visit in place.
 // Updates only this visit's planned_start. Never deletes or recreates the visit.
@@ -35,7 +36,7 @@ export default function ChangeVisitTime({
     if (!plannedStart) return setMsg('Choose a valid date and time.')
     if (date < today) return setMsg('The date cannot be in the past.')
     if (date === currentDate && time === currentTime) return setMsg('That is already the planned time.')
-    if (!isHalfHourSlot(time)) return setMsg(SLOT_MESSAGE)   // C17: 30-minute slots only
+    if (!isTimeSlot(time)) return setMsg(SLOT_MESSAGE)   // C19: 5-minute steps only
 
     setBusy(true)
     try {
@@ -94,7 +95,7 @@ export default function ChangeVisitTime({
       <h2>Change time</h2>
       <p className="small">This moves the same visit. Nothing is deleted or duplicated.</p>
       <label>Date<input type="date" min={today} value={date} disabled={busy} onChange={e => setDate(e.target.value)} /></label>
-      <label>Time<input type="time" required step={1800} value={time} disabled={busy} onChange={e => setTime(e.target.value)} /></label>
+      <TimeSelect label="Time" value={time} disabled={busy} onChange={setTime} />
       {msg && <p className="msg">{msg}</p>}
       <button className="primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save new time'}</button>
       <button

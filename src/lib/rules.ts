@@ -156,6 +156,19 @@ export function splitCancelledVisits<T extends { status: string }>(visits: T[]):
   }
 }
 
+// C20: one visit per customer per day. A new stop for a customer is blocked while that customer
+// already has a visit today that is still to do (planned), done (visited) or moved to another
+// day (rescheduled). A cancelled visit or an unavailable customer still allows another try.
+export const STOP_BLOCKING_STATUSES = ['planned', 'visited', 'rescheduled'] as const
+
+export function blocksNewStopToday(visit: { status: string }): boolean {
+  return (STOP_BLOCKING_STATUSES as readonly string[]).includes(visit.status)
+}
+
+export function sameDayVisitMessage(customerName: string | null | undefined): string {
+  return `${customerName || 'This customer'} already has a visit today. Open it instead of adding a new stop.`
+}
+
 // ---------------- Energy (HEALTH check-in) ----------------
 
 // HEALTH saves energy on a 0-3 scale (see src/features/health/HealthPage.tsx).

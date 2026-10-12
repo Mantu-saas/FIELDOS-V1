@@ -79,10 +79,12 @@ export default function SalesView({ userId }: { userId: string }) {
     setCustomerId(row.customer_id ?? '')
     setCategory(row.product_category ?? '')
     setMsg('')
+    setListMsg(null)   // an old "Sale cancelled" note no longer applies once you move on
   }
 
   async function save() {
     setMsg('')
+    setListMsg(null)   // an old "Sale cancelled" note no longer applies once you move on
 
     const a = Number(amount)
 
