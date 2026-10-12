@@ -12,6 +12,7 @@ import {
   workingHours
 } from '../../lib/visitTime'
 import TimeSelect from '../../components/TimeSelect'
+import { STOP_BLOCKING_STATUSES } from '../../lib/rules'
 
 const IST = 'Asia/Kolkata'
 
@@ -222,14 +223,17 @@ export default function RescheduleVisit({
     setBusy(true)
 
     try {
-      // Check the selected customer's schedule for this date.
-      // When moving a visit, exclude that visit's own ID.
+      // One visit per customer per day (C20 rule): another planned, visited or rescheduled
+      // visit that day blocks this one. Cancelled or unavailable visits do not.
+      // The original visit being rescheduled never blocks its own replacement,
+      // and when moving a visit, that visit's own ID is excluded too.
       let duplicateQuery = supabase
         .from('visits')
         .select('id,planned_start')
         .eq('user_id', userId)
         .eq('customer_id', visit.customer_id)
-        .eq('status', 'planned')
+        .in('status', [...STOP_BLOCKING_STATUSES])
+        .neq('id', visit.id)
         .gte('planned_start', `${date}T00:00:00+05:30`)
         .lt('planned_start', `${nextDay(date)}T00:00:00+05:30`)
 
@@ -257,7 +261,7 @@ export default function RescheduleVisit({
           : ''
 
         setMsg(
-          `${visit.customers?.name ?? 'This customer'} already has a planned visit on ${date}${existingTime}. Choose another date.`
+          `${visit.customers?.name ?? 'This customer'} already has a visit on ${date}${existingTime}. Choose another date.`
         )
         return
       }
