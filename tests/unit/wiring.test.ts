@@ -286,3 +286,53 @@ test('SALES: the "Sale cancelled" note is cleared when you edit or save another 
   assert.match(startEdit, /setListMsg\(null\)/)
   assert.match(save, /setListMsg\(null\)/)
 })
+
+// ---------- COACH: priorities and protected home time ----------
+
+test('COACH: the first screen is person-first (most important thing, reason, action, next priorities, constraints)', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  const fn = src.slice(src.indexOf('function buildOverviewAnswer'), src.indexOf('function buildUnknownAnswer'))
+  for (const s of ["TODAY'S MOST IMPORTANT THING", 'Priority: ${top.priority}', 'Reason: ${top.reason}', 'Action: ${top.action}', 'NEXT PRIORITIES', 'CONSTRAINTS']) {
+    assert.ok(fn.includes(s), s)
+  }
+  assert.doesNotMatch(src, /Nothing is scheduled or due\. Ask me who to visit/)
+  assert.match(src, /\{answer \|\| buildOverviewAnswer\(\)\}/)
+})
+
+test('COACH: "what should I do today" and "most important" open the priority plan', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  assert.match(src, /\\bmost important\\b/)
+  assert.match(src, /return 'today'/)
+  assert.match(src, /case 'today': return buildOverviewAnswer\(\)/)
+})
+
+test('COACH: home time uses the saved commitments, a typed time, and the shared plan rules', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  const sched = src.slice(src.indexOf('function buildScheduleAnswer'), src.indexOf('function buildTomorrowAnswer'))
+  assert.match(sched, /homePlanFor\(s, tomorrow, q\)/)
+  assert.match(sched, /homePlanText\(plan\)/)
+  assert.match(src, /parseQuestionTime\(q\)/)
+  // cancelled and completed personal events never constrain the plan
+  assert.match(src, /\['cancelled', 'completed', 'complete', 'done'\]\.includes\(e\.status\.toLowerCase\(\)\)/)
+  // all-day flag and real end times are passed through, not treated as all-day blocks
+  assert.match(src, /allDay: e\.all_day,/)
+  assert.match(src, /startMin: e\.all_day \? null : istMinutes/)
+})
+
+test('COACH: only the signed-in user\'s records are read, including the new visit history', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  const load = src.slice(src.indexOf('async function loadCoachData'), src.indexOf('useEffect(() => {\n    loadCoachData'))
+  const queries = load.split(".from('").slice(1)
+  assert.equal(queries.length, 7)
+  for (const q of queries) assert.match(q, /\.eq\('user_id', userId\)/, q.slice(0, 40))
+  assert.match(load, /\.eq\('status', 'visited'\)/)
+})
+
+test('COACH: today and tomorrow are India dates; cancelled visits and sales stay excluded', () => {
+  const src = read('src/features/coach/CoachPage.tsx')
+  assert.match(src, /const today = todayIST\(\)\n    const tomorrow = addDays\(today, 1\)/)
+  const pri = src.slice(src.indexOf('function prioritiesFor'), src.indexOf('function commitmentLines'))
+  assert.match(pri, /s\.todayUpcoming\.map/)                 // planned visits only (cancelled are never pending)
+  assert.match(pri, /\[\.\.\.s\.overdue, \.\.\.s\.dueToday\]/) // open follow-ups only
+  assert.match(src, /monthSales: activeSalesTotal\(/)          // cancelled sales never count for a customer
+})

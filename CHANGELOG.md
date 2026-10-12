@@ -1,4 +1,15 @@
 # Changelog
+## 2026-10-13 — COACH: person-first priorities and protected home time (branch feat/coach-priorities, NOT merged, NOT deployed)
+
+- New `src/lib/coachPlan.ts` (pure, tested): today's priorities, customer suggestions and a home-time / personal-commitment plan.
+- First screen now answers "What is the most important thing I should do today?": Priority, Reason, Action, then the next priorities in order and the constraints (personal commitments, home time, warnings, missing data). Replaces "Nothing is scheduled or due. Ask me…".
+- Priority order: a plan that breaks a personal commitment → a visit within the hour → due/overdue follow-ups with a saved value → the next visit → other due follow-ups → remaining visits → visits with no outcome recorded → (when the day is empty) customers who deserve attention → preparing tomorrow.
+- Empty day: customers ranked by saved priority, potential amount and time since their last completed visit (new read of this user's visited visits, last 90 days), with the evidence shown. If saved data cannot tell customers apart, COACH says what to add instead of guessing.
+- Home time (rewritten logic): checks every remaining visit (15-minute planning default) against timed personal events (start and end), events with no end time (warned, not assumed to block the day), all-day events (noted, not treated as a time block) and home time from the profile or typed in the question ("home by 9:30 pm"). Each visit gets KEEP, MOVE (priority 1-2) or CALL INSTEAD, with the reason. Never claims a journey fits: travel time is not saved.
+- "What should I do today/now", "most important" open the priority plan. Tomorrow's answer checks tomorrow's commitments; "who should I visit" uses the same evidence ranking.
+- Not changed: database, migrations, data, production settings.
+- Verification: 145/145 tests pass (25 new). Local build BLOCKED (packages cannot be downloaded). Browser: NOT TESTED.
+
 ## 2026-10-12 — C20: one visit per customer per day + SALES message fix (same branch as C19, NOT merged, NOT deployed)
 
 - Found in PR #19 browser testing: ROUTE allowed a second stop (and a second "Visited") for Test Shop 1 on the same day, because only a still-planned stop blocked a new one.
