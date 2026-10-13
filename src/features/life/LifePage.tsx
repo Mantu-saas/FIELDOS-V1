@@ -135,6 +135,22 @@ export default function LifePage({
           {busy ? 'Saving…' : 'Save my life priorities'}
         </button>
       </div>
+
+      {/* R1: plain privacy note for pilot users */}
+      <div className="card">
+        <h2>Your data</h2>
+        <p className="small">
+          Swayam keeps the customers, visits, sales, follow-ups, events and check-ins you enter, so it can plan your day.
+        </p>
+        <p className="small">
+          Your account can see only your own records. Swayam does not track your location and does not report to your
+          company or manager.
+        </p>
+        <p className="small">
+          The Swayam team can open the database only to fix problems. To delete your account and all your data, ask the
+          person who set up your account.
+        </p>
+      </div>
     </div>
   )
 }

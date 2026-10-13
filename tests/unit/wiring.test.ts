@@ -58,7 +58,7 @@ test('C10: rescheduling uses the working-hours default and also serves "Reschedu
   assert.match(src, /visit\.status === 'rescheduled'/)
   // existing safeguards are kept
   assert.match(src, /The new time must be in the future\./)
-  assert.match(src, /already has a planned visit on/)
+  assert.match(src, /already has a visit on/)
 })
 
 test('C10: choosing "Rescheduled" leads to planning the replacement, without forcing a follow-up task', () => {
@@ -151,18 +151,23 @@ test('C18: duplicate-visit count is loaded from the database, scoped like the sa
 })
 
 test('C18: visit detail writes the same note the matching rule looks for', () => {
+  // C21: the sale is written by lib/visitRecord.ts, with the note passed in by the screen
   const src = read('src/features/visits/VisitDetail.tsx')
-  assert.match(src, /notes: VISIT_SALE_NOTE/)
+  assert.match(src, /saleNote: VISIT_SALE_NOTE/)
   assert.doesNotMatch(src, /notes: 'From visit'/)
+  assert.match(read('src/lib/visitRecord.ts'), /notes: input\.saleNote/)
 })
 
 test('C18: visit sale date and actual_start come from the same moment (midnight-safe)', () => {
+  // C21: the screen works out `now` and `saleDate` once and passes both to lib/visitRecord.ts
   const src = read('src/features/visits/VisitDetail.tsx')
   assert.match(src, /const now = new Date\(\)\.toISOString\(\)/)
-  assert.match(src, /actual_start: now/)
   assert.match(src, /const saleDate = istDateOf\(now\)/)
-  assert.match(src, /sale_date: saleDate/)
+  assert.match(src, /now, saleDate, saleNote/)
   assert.doesNotMatch(src, /sale_date: today/)
+  const lib = read('src/lib/visitRecord.ts')
+  assert.match(lib, /actual_start: input\.now/)
+  assert.match(lib, /sale_date: input\.saleDate/)
 })
 
 test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared rule', () => {
@@ -200,8 +205,12 @@ test('Fix A: ROUTE numbers, gaps and navigation use only active visits; cancelle
   assert.match(src, /Cancelled today \(\{cancelledVisits\.length\}\)/)
   assert.match(src, /cancelledVisits\.map\(visit =>[\s\S]*?onClick=\{\(\) => setSelected\(visit\.id\)\}[\s\S]*?CANCELLED/)
   assert.match(src, /const selectedVisit = visits\.find/)           // opening uses the full list
-  // no new deletes: cancelling never removes data
-  assert.equal((src.match(/\.delete\(\)/g) ?? []).length, 1)        // only the existing "Remove planned stop"
+  // no new deletes: cancelling never removes data. C21: the only delete ("Remove planned stop")
+  // now lives in lib/visitRecord.ts and only removes a visit that is still planned.
+  assert.equal((src.match(/\.delete\(\)/g) ?? []).length, 0)
+  const lib = read('src/lib/visitRecord.ts')
+  assert.equal((lib.match(/\.delete\(\)/g) ?? []).length, 1)
+  assert.match(lib, /\.delete\(\)\s*\.eq\('id', visitId\)\s*\.eq\('user_id', userId\)\s*\.eq\('status', 'planned'\)/)
 })
 
 test('Fix A: COACH counts today\'s visits without cancelled ones', () => {
@@ -213,8 +222,10 @@ test('Fix A: COACH counts today\'s visits without cancelled ones', () => {
   assert.match(src, /const todayPlanned = todayAll\.filter\(isPlannedVisit\)/)
 })
 
-test('Fix A: My Week shows only still-planned visits as work', () => {
-  assert.match(read('src/features/myweek/MyWeekPage.tsx'), /setPlannedVisits\(visits\.filter\(visit => visit\.status === 'planned'\)\)/)
+test('Fix A (updated in V1): My Week never shows cancelled visits as work; visited ones count as completed', () => {
+  const src = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(src, /setWeekVisits\(visits\.filter\(isPlannerVisit\)\)/)   // isPlannerVisit excludes cancelled (weekPlan tests)
+  assert.match(src, /dayVisits\.filter\(visit => visit\.status === 'visited'\)\.length/)
 })
 
 // ---------------- Fix B: cancelled sales ----------------
@@ -285,4 +296,111 @@ test('SALES: the "Sale cancelled" note is cleared when you edit or save another 
   const save = src.slice(src.indexOf('async function save'), src.indexOf('async function cancelSale'))
   assert.match(startEdit, /setListMsg\(null\)/)
   assert.match(save, /setListMsg\(null\)/)
+})
+
+// ---------- V1 reliability ----------
+
+test('V1: Change time and Reschedule use the same one-visit-per-day rule as Add stop', () => {
+  for (const file of ['src/features/visits/ChangeVisitTime.tsx', 'src/features/visits/RescheduleVisit.tsx']) {
+    const src = read(file)
+    assert.match(src, /\.in\('status', \[\.\.\.STOP_BLOCKING_STATUSES\]\)/, file)
+    assert.doesNotMatch(src, /\.eq\('status', 'planned'\)\s*\n\s*\.gte\('planned_start'/, `${file}: old planned-only check gone`)
+  }
+  // Reschedule: the original visit never blocks its own replacement
+  assert.match(read('src/features/visits/RescheduleVisit.tsx'), /\.neq\('id', visit\.id\)/)
+  // Change time: the visit being moved never blocks itself
+  assert.match(read('src/features/visits/ChangeVisitTime.tsx'), /\.neq\('id', visit\.id\)/)
+})
+
+test('V1: HEALTH saves and loads the check-in for the India date, like TODAY and COACH', () => {
+  const src = read('src/features/health/HealthPage.tsx')
+  assert.match(src, /useMemo\(\(\) => todayIST\(\), \[\]\)/)
+  assert.doesNotMatch(src, /getTimezoneOffset/)
+})
+
+test('V1: My Week shows one time-ordered list with clash warnings, and events can be cancelled safely', () => {
+  const src = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(src, /dayTimeline<PersonalEvent, WeekVisit, FollowUpRow>\(/)
+  assert.match(src, /dayClashes\(dayEvents, dayVisits, formatTimeIST\)/)
+  assert.match(src, /changeEventStatus\(event, 'cancelled'\)/)
+  assert.match(src, /window\.confirm\(`Cancel "/)
+  assert.match(src, /\.select\('id,status'\)/)                       // the change is confirmed by the database
+  assert.match(src, /data\.length !== 1 \|\| data\[0\]\.status !== nextStatus/)
+  assert.match(src, /setWeekVisits\(visits\.filter\(isPlannerVisit\)\)/)
+})
+
+// ---------- C21: safe record/remove and rescheduling history ----------
+
+test('C21: Record visit goes through recordVisit only (no direct visit update or sale insert on the screen)', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.match(src, /recordVisit\(supabase, \{/)
+  assert.doesNotMatch(src, /\.from\('visits'\)\.update\(/)
+  assert.doesNotMatch(src, /\.from\('sales'\)\.insert\(/)
+  assert.doesNotMatch(src, /\.from\('follow_ups'\)\.insert\(/)
+  assert.match(src, /ALREADY_RECORDED_MESSAGE/)
+  assert.match(src, /if \(busy\) return/)
+})
+
+test('C21: recordVisit only updates a still-planned visit of this user and checks one row changed', () => {
+  const src = read('src/lib/visitRecord.ts')
+  const fn = src.slice(src.indexOf('export async function recordVisit'), src.indexOf('export type RemoveStopResult'))
+  assert.match(fn, /\.eq\('user_id', input\.userId\)/)
+  assert.match(fn, /\.eq\('status', 'planned'\)/)
+  assert.ok(fn.indexOf("update.data.length !== 1") < fn.indexOf(".from('sales')"), 'row check before the sale')
+})
+
+test('C21: Remove on ROUTE goes through removePlannedStop (never deletes a recorded visit)', () => {
+  const src = read('src/features/route/RoutePage.tsx')
+  assert.match(src, /removePlannedStop\(supabase, userId, id\)/)
+  assert.doesNotMatch(src, /\.delete\(\)/)
+})
+
+test('C21: recording keeps the rescheduling history line', () => {
+  assert.match(read('src/features/visits/VisitDetail.tsx'), /notes: notesAfterRecording\(visit\.notes, notes\)/)
+})
+
+test('C21: Reschedule saves the history line with the shared helper', () => {
+  const src = read('src/features/visits/RescheduleVisit.tsx')
+  assert.match(src, /const marker = rescheduleMarker\(/)
+  assert.match(src, /\.eq\('notes', marker\)/)
+})
+
+test('C21: My Week and the visit screen show history in plain words, not the raw stored text', () => {
+  const week = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(week, /visitNoteLines\(visit\.notes\)/)
+  assert.doesNotMatch(week, /\{visit\.notes\}/)
+  const detail = read('src/features/visits/VisitDetail.tsx')
+  assert.doesNotMatch(detail, /\{visit\.notes\}/)
+  assert.match(detail, /visitNoteLines\(pre\.lastVisit\.notes\)/)
+})
+
+// ---------- R1: TODAY ----------
+
+test('R1: TODAY shows the Next action card from the shared rule, scoped to this user', () => {
+  const src = read('src/features/today/TodayPage.tsx')
+  assert.match(src, /nextAction\(\{ now: new Date\(\), visits: plan\.visits, followUps: plan\.followUps, homeTime: profile\.preferred_home_time \}\)/)
+  assert.match(src, /\.from\('visits'\)\s*\.select\('status,planned_start,customers\(name\)'\)\s*\.eq\('user_id', profile\.id\)/)
+  assert.match(src, /\.from\('follow_ups'\)\s*\.select\('due_date,action,customers\(name\)'\)\s*\.eq\('user_id', profile\.id\)\s*\.eq\('status', 'open'\)/)
+  assert.match(src, /Could not load your plan/)   // shows the problem instead of guessing
+})
+
+test('R1: TODAY ignores cancelled events and only real dates trigger the date message', () => {
+  const src = read('src/features/today/TodayPage.tsx')
+  assert.match(src, /event\.status !== 'cancelled'/)
+  assert.match(src, /const isDatingDay = isRomanticDate\(eventText\)/)
+  assert.doesNotMatch(src, /eventText\.includes\('date'\)/)
+})
+
+test('R1: LIFE shows the privacy note, with no location tracking and no manager reporting', () => {
+  const src = read('src/features/life/LifePage.tsx')
+  assert.match(src, /<h2>Your data<\/h2>/)
+  assert.match(src, /does not track your location/)
+  assert.match(src, /does not report to your\s+company or manager/)
+})
+
+test('R1: still no location tracking anywhere in the app', () => {
+  const files = readdirSync(new URL('../../src/features', import.meta.url), { recursive: true }) as string[]
+  for (const f of files.filter(f => f.endsWith('.tsx'))) {
+    assert.doesNotMatch(read('src/features/' + f), /navigator\.geolocation/, f)
+  }
 })

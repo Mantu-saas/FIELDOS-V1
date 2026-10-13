@@ -12,7 +12,9 @@ import {
   type PersonalEvent
 } from '../../lib/personalEvents'
 import { activeSales, activeSalesTotal } from '../../lib/rules'
+import { dayClashes, dayTimeline, isPlannerVisit } from '../../lib/weekPlan'
 import EventForm from './EventForm'
+import { visitNoteLines } from '../../lib/visitHistory'
 
 const cap = (s: string) =>
   s.charAt(0).toUpperCase() + s.slice(1)
@@ -62,6 +64,7 @@ type WeekVisit = {
   planned_start: string
   notes: string | null
   customers?: { name: string } | { name: string }[] | null
+  name: string
 }
 
 function visitCustomerName(item: WeekVisit): string {
@@ -93,7 +96,7 @@ export default function MyWeekPage({
 }) {
   const [events, setEvents] = useState<PersonalEvent[]>([])
   const [followUps, setFollowUps] = useState<FollowUpRow[]>([])
-  const [plannedVisits, setPlannedVisits] = useState<WeekVisit[]>([])
+  const [weekVisits, setWeekVisits] = useState<WeekVisit[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [summaryErrors, setSummaryErrors] = useState<string[]>([])
@@ -171,8 +174,11 @@ export default function MyWeekPage({
       status: string | null
     }[]
 
-    const visits = (visitsResult.data ?? []) as unknown as WeekVisit[]
-    setPlannedVisits(visits.filter(visit => visit.status === 'planned'))
+    const visits = ((visitsResult.data ?? []) as unknown as WeekVisit[])
+      .map(visit => ({ ...visit, name: visitCustomerName(visit) }))
+    // Planned visits and visits already done (shown as completed); cancelled,
+    // unavailable and rescheduled visits are not part of the plan for that day
+    setWeekVisits(visits.filter(isPlannerVisit))
 
     const loadedFollowUps = (followUpsResult.data ?? []) as FollowUpRow[]
     setFollowUps(loadedFollowUps)
@@ -199,21 +205,36 @@ export default function MyWeekPage({
 
   async function changeEventStatus(
     event: PersonalEvent,
-    nextStatus: 'planned' | 'completed'
+    nextStatus: 'planned' | 'completed' | 'cancelled'
   ) {
+    if (
+      nextStatus === 'cancelled' &&
+      !window.confirm(`Cancel "${event.title}"? It stays in your week, crossed out.`)
+    ) {
+      return
+    }
+
     setError('')
     setSavingEventId(event.id)
 
-    const { error: updateError } = await supabase
+    // Ask for the changed row back, so a change is only accepted when it is confirmed
+    const { data, error: updateError } = await supabase
       .from('personal_events')
       .update({ status: nextStatus })
       .eq('id', event.id)
       .eq('user_id', profile.id)
+      .select('id,status')
 
     if (updateError) {
       setError(
         'Could not update this event: ' + updateError.message
       )
+      setSavingEventId(null)
+      return
+    }
+
+    if (!data || data.length !== 1 || data[0].status !== nextStatus) {
+      setError('The change to this event was not confirmed. Nothing was changed. Please try again.')
       setSavingEventId(null)
       return
     }
@@ -282,8 +303,8 @@ export default function MyWeekPage({
           Today + the next 6 days · India time
         </p>
         <p className="small">
-          Your planner moves forward automatically each day. Follow-ups appear
-          on their due date below your personal events.
+          Your planner moves forward automatically each day. Each day lists
+          events and visits in time order; follow-ups due that day come last.
         </p>
         <button
           className="primary"
@@ -342,7 +363,7 @@ export default function MyWeekPage({
         </div>
       ) : (
         days.map(date => {
-          const list = events.filter(
+          const dayEvents = events.filter(
             event =>
               istDate(new Date(event.starts_at)) === date
           )
@@ -355,15 +376,21 @@ export default function MyWeekPage({
               !['dropped', 'cancelled'].includes(item.status.toLowerCase())
           )
 
-          // Planned customer visits for this day (including rescheduled ones), by time
-          const dayVisits = plannedVisits
-            .filter(visit => istDate(new Date(visit.planned_start)) === date)
-            .sort((a, b) => new Date(a.planned_start).getTime() - new Date(b.planned_start).getTime())
+          const dayVisits = weekVisits.filter(
+            visit => istDate(new Date(visit.planned_start)) === date
+          )
 
+          // One list in time order (lib/weekPlan.ts) and any clashes between open items
+          const timeline = dayTimeline<PersonalEvent, WeekVisit, FollowUpRow>(dayEvents, dayVisits, dayFollowUps)
+          const clashes = dayClashes(dayEvents, dayVisits, formatTimeIST)
+
+          // Cancelled events are shown crossed out but are not counted as work
+          const countedEvents = dayEvents.filter(event => event.status !== 'cancelled')
           const completedCount =
-            list.filter(event => isCompleted(event.status)).length +
-            dayFollowUps.filter(item => isCompleted(item.status)).length
-          const totalCount = list.length + dayFollowUps.length + dayVisits.length
+            countedEvents.filter(event => isCompleted(event.status)).length +
+            dayFollowUps.filter(item => isCompleted(item.status)).length +
+            dayVisits.filter(visit => visit.status === 'visited').length
+          const totalCount = countedEvents.length + dayFollowUps.length + dayVisits.length
           const plannedCount = totalCount - completedCount
 
           const isToday = date === today
@@ -412,134 +439,159 @@ export default function MyWeekPage({
                 </div>
               )}
 
-              {list.map(event => {
-                const completed = isCompleted(event.status)
-                const cancelled = event.status === 'cancelled'
-
-                return (
-                  <div
-                    key={event.id}
-                    className="line"
-                    style={{
-                      alignItems: 'flex-start',
-                      gap: '12px'
-                    }}
-                  >
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <b
-                        style={
-                          completed || cancelled
-                            ? { textDecoration: 'line-through' }
-                            : undefined
-                        }
-                      >
-                        {event.title}
-                      </b>
-
-                      <br />
-
-                      <span className="small">
-                        {cap(event.category)} ·{' '}
-                        {cap(event.priority)} priority ·{' '}
-                        {cap(event.status)}
-                        {event.location ? ' · ' + event.location : ''}
-                      </span>
-
-                      {event.amount !== null && (
-                        <>
-                          <br />
-                          <b>{inrText(event.amount)}</b>
-                        </>
-                      )}
-
-                      <br />
-
-                      {!cancelled && (
-                        <button
-                          className="link"
-                          disabled={savingEventId === event.id}
-                          onClick={() =>
-                            changeEventStatus(
-                              event,
-                              completed ? 'planned' : 'completed'
-                            )
-                          }
-                        >
-                          {savingEventId === event.id
-                            ? 'Saving…'
-                            : completed
-                              ? 'Mark as planned'
-                              : '✓ Mark completed'}
-                        </button>
-                      )}
-                    </span>
-
-                    <span
-                      style={{
-                        textAlign: 'right',
-                        flexShrink: 0
-                      }}
-                    >
-                      <span className="small">
-                        {timeLabel(event)}
-                      </span>
-                      <br />
-                      <button
-                        className="link"
-                        onClick={() => setEditingEvent(event)}
-                      >
-                        Edit
-                      </button>
-                    </span>
-                  </div>
-                )
-              })}
-
-              {dayVisits.map(visit => (
-                <div
-                  key={`visit-${visit.id}`}
-                  className="line"
-                  style={{
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                    borderTop: '1px solid #e5e7eb',
-                    paddingTop: '10px',
-                    marginTop: '10px'
-                  }}
-                >
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <b>Visit: {visitCustomerName(visit)}</b>
-                    <br />
-                    <span className="small">Customer visit · To visit</span>
-                    {visit.notes && (
-                      <>
-                        <br />
-                        <span className="small">{visit.notes}</span>
-                      </>
-                    )}
-                  </span>
-                  <span style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <span className="small">{formatTimeIST(visit.planned_start)}</span>
-                  </span>
-                </div>
+              {clashes.map(warning => (
+                <p className="msg" key={warning}>⚠ {warning}</p>
               ))}
 
-              {dayFollowUps.map(item => {
+              {timeline.map((entry, index) => {
+                const rowStyle = {
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  ...(index > 0
+                    ? { borderTop: '1px solid #e5e7eb', paddingTop: '10px', marginTop: '10px' }
+                    : {})
+                }
+
+                if (entry.kind === 'event') {
+                  const event = entry.item
+                  const completed = isCompleted(event.status)
+                  const cancelled = event.status === 'cancelled'
+
+                  return (
+                    <div key={entry.key} className="line" style={rowStyle}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <b
+                          className={cancelled ? 'cancelled-text' : undefined}
+                          style={
+                            completed
+                              ? { textDecoration: 'line-through' }
+                              : undefined
+                          }
+                        >
+                          {event.title}
+                        </b>
+                        {cancelled && (
+                          <>
+                            {' '}
+                            <span className="cancelled-label">CANCELLED</span>
+                          </>
+                        )}
+
+                        <br />
+
+                        <span className="small">
+                          {cap(event.category)} ·{' '}
+                          {cap(event.priority)} priority ·{' '}
+                          {cap(event.status)}
+                          {event.location ? ' · ' + event.location : ''}
+                        </span>
+
+                        {event.amount !== null && (
+                          <>
+                            <br />
+                            <b>{inrText(event.amount)}</b>
+                          </>
+                        )}
+
+                        <br />
+
+                        {cancelled ? (
+                          <button
+                            className="link"
+                            disabled={savingEventId === event.id}
+                            onClick={() => changeEventStatus(event, 'planned')}
+                          >
+                            {savingEventId === event.id ? 'Saving…' : 'Restore event'}
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              className="link"
+                              disabled={savingEventId === event.id}
+                              onClick={() =>
+                                changeEventStatus(
+                                  event,
+                                  completed ? 'planned' : 'completed'
+                                )
+                              }
+                            >
+                              {savingEventId === event.id
+                                ? 'Saving…'
+                                : completed
+                                  ? 'Mark as planned'
+                                  : '✓ Mark completed'}
+                            </button>
+                            {!completed && (
+                              <button
+                                className="link"
+                                disabled={savingEventId === event.id}
+                                onClick={() => changeEventStatus(event, 'cancelled')}
+                              >
+                                Cancel event
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </span>
+
+                      <span
+                        style={{
+                          textAlign: 'right',
+                          flexShrink: 0
+                        }}
+                      >
+                        <span className="small">
+                          {timeLabel(event)}
+                        </span>
+                        <br />
+                        {!cancelled && (
+                          <button
+                            className="link"
+                            onClick={() => setEditingEvent(event)}
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  )
+                }
+
+                if (entry.kind === 'visit') {
+                  const visit = entry.item
+                  const done = visit.status === 'visited'
+
+                  return (
+                    <div key={entry.key} className="line" style={rowStyle}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <b style={done ? { textDecoration: 'line-through' } : undefined}>
+                          Visit: {visit.name}
+                        </b>
+                        <br />
+                        <span className="small">
+                          Customer visit · {done ? 'Visited' : 'To visit'}
+                        </span>
+                        {/* C21: rescheduling history in plain words, then the salesperson's note */}
+                        {visitNoteLines(visit.notes).map((line, i) => (
+                          <span key={i}>
+                            <br />
+                            <span className="small">{line}</span>
+                          </span>
+                        ))}
+                      </span>
+                      <span style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <span className="small">{formatTimeIST(visit.planned_start)}</span>
+                      </span>
+                    </div>
+                  )
+                }
+
+                const item = entry.item
                 const completed = isCompleted(item.status)
                 const customerName = followUpCustomerName(item)
 
                 return (
-                  <div
-                    key={`follow-up-${item.id}`}
-                    className="line"
-                    style={{
-                      alignItems: 'flex-start',
-                      gap: '12px',
-                      borderTop: '1px solid #e5e7eb',
-                      paddingTop: '10px',
-                      marginTop: '10px'
-                    }}
-                  >
+                  <div key={entry.key} className="line" style={rowStyle}>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <b style={completed ? { textDecoration: 'line-through' } : undefined}>
                         Follow-up: {customerName}
@@ -568,7 +620,7 @@ export default function MyWeekPage({
                       </button>
                     </span>
                     <span style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <span className="small">Due date</span>
+                      <span className="small">Due this day</span>
                     </span>
                   </div>
                 )

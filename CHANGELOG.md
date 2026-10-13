@@ -1,5 +1,41 @@
 # Changelog
+## 2026-10-13 — R1: pilot release (branch release/r1-pilot, NOT merged, NOT deployed)
+
+- Combines fix/v1-reliability and C21 (fix/c21-visit-record-guard); their 4 overlapping files were resolved by keeping both sides.
+- C21 database rules proven on the real test database by a rolled-back test (13 Oct): a stale second recording, a stale Remove and any action on another account's visit are all refused; no second sale; nothing was left behind (before/after snapshots identical).
+- TODAY: new "Next action" card at the top, from fixed rules on the user's own data (src/lib/nextAction.ts): record a missed visit → wrap up near home time → overdue/due follow-up → next visit → plan tomorrow. Shows the reason and counts; shows an error instead of guessing when data can't load.
+- TODAY: the "date" message now appears only for real dates ("date night", "dinner date"…), not for "Update stock" or "Due date"; cancelled personal events no longer shape the day's message.
+- LIFE: "Your data" privacy note for pilot users.
+- Production database structure checked read-only (13 Oct, from the founder's export): all tables and fields the app needs are present; privacy rules on for every table.
+- Verification: unit tests pass (see commit). Full build/type check and browser: see the release notes for what could and could not be run.
+## 2026-10-13 — C21: safe "Record visit" / "Remove", and rescheduling history kept (branch fix/c21-visit-record-guard, NOT pushed, NOT merged, NOT deployed)
+
+- Found in the Archana / Debasis investigation (read-only). "Rescheduled from 2026-10-11 (Cancelled)" is the replacement visit's own note, written on purpose by Reschedule; the original visit is never changed.
+- Fix 1: "Record visit" now records a visit only while it is still planned and belongs to this user, and confirms exactly one visit changed. Only then are the sale and follow-up added. A visit already recorded (another phone, old screen) shows "This visit was already recorded… Nothing was saved" — no second sale, no second follow-up, no overwritten result.
+- Fix 1: ROUTE "Remove" deletes a stop only while it is still planned. A visit recorded meanwhile is kept and the route refreshes with a message.
+- Fix 2: recording a replacement visit keeps its "Rescheduled from …" line first, with the typed note after it (it used to be erased). The stored wording is unchanged, so existing visits still match.
+- Fix 2: My Week and the visit screen show it in plain words: "Moved here from Sun 11 Oct. That visit was cancelled."
+- New: src/lib/visitRecord.ts, src/lib/visitHistory.ts (+ tests). No database, migration or Supabase change.
+- Verification: 153/153 tests pass (120 existing + 33 new; 3 older text checks moved to the new file location). Strict type check of the new files and syntax check of every changed file pass. Full build/type check BLOCKED (packages cannot be downloaded). Browser: NOT TESTED.
 ## 2026-10-12 — C20: one visit per customer per day + SALES message fix (same branch as C19, NOT merged, NOT deployed)
+
+## 2026-10-13 — V1 reliability: My Week timeline, one-visit-per-day everywhere, HEALTH date (branch fix/v1-reliability, NOT merged, NOT deployed)
+
+- My Week: each day is now ONE list in time order — all-day events, then events and visits by start time, then follow-ups due that day (new `src/lib/weekPlan.ts`). Before, events, visits and follow-ups were shown in three separate groups.
+- My Week: time-clash warning when open events and planned visits overlap (a visit counts as 15 minutes, the same planning default as ROUTE). Cancelled, completed, all-day items and visits already done never warn.
+- My Week: personal events can now be cancelled ("Cancel event", with a confirmation) and restored. Before, there was no way to cancel an event. Cancelled events stay visible, crossed out, and are not counted as work. Status changes are accepted only when the database returns the changed event.
+- My Week: visits already done now stay on their day as completed (they used to disappear); cancelled, unavailable and rescheduled visits are still left out.
+- Change time and Reschedule now use the same one-visit-per-day rule as Add stop (planned, visited or rescheduled blocks; cancelled or unavailable does not). Before, they only blocked a second PLANNED visit, so a visit could be moved onto a day the customer was already visited. The visit being moved, or the original being rescheduled, never blocks itself.
+- HEALTH saves and loads the check-in for the India date (same as TODAY and COACH) instead of the phone's own time zone.
+- Not changed: database, migrations, data, existing duplicate visits, production settings.
+- Verification: 132/132 tests pass (12 new). Local build BLOCKED (packages cannot be downloaded). Browser: NOT TESTED.
+
+## 2026-10-12 — C18 + Fixes A/B/C: cancelled sales and visits (PR #19; merged and deployed as 2f41c9f)
+
+- ROUTE and COACH say when a visit's sale was cancelled in SALES and is not counted; cancelled visits are set apart in "Cancelled today"; SALES confirms a cancellation with the database and shows it red and struck through; COACH shows a stress line only for a valid 1-10 score.
+- Verification: tests pass; Cloudflare preview build passed; browser-tested on the preview with the test database.
+
+## 2026-10-12 — C20: one visit per customer per day + SALES message fix (PR #20; merged and deployed as 794cead)
 
 - Found in PR #19 browser testing: ROUTE allowed a second stop (and a second "Visited") for Test Shop 1 on the same day, because only a still-planned stop blocked a new one.
 - Product rule (Product Owner): a new stop is blocked while the customer already has a visit today that is planned, visited or rescheduled. A cancelled visit or "customer unavailable" still allows another try.
@@ -7,9 +43,9 @@
 - Add stop checks the list on screen AND re-checks the database just before saving (in case another phone recorded a visit). If that check fails, the stop is not added.
 - Not covered: existing duplicate visits are left as they are; no database rule (a database-level guarantee would need a separate migration decision).
 - SALES: the "Sale cancelled…" note now disappears when you edit or save another sale.
-- Verification: 120/120 tests pass. Local build/type check BLOCKED (packages cannot be downloaded). Browser: NOT TESTED.
+- Verification: 120/120 tests pass. Cloudflare preview build passed. Browser-tested on the preview with the test database (Add stop picker, block, Change time, move to tomorrow, SALES message on save).
 
-## 2026-10-12 — C19: 5-minute visit times with a 12-hour picker (branch fix/c19-five-minute-times, NOT merged, NOT deployed)
+## 2026-10-12 — C19: 5-minute visit times with a 12-hour picker (PR #20; merged and deployed as 794cead)
 
 - Product decision (Product Owner, during PR #19 browser testing): visit times move in 5-minute steps (3:00, 3:05, 3:10 ...), replacing C17's :00/:30 slots. Found because the free time box accepted 2:23 and then showed a red "hour or half-hour" message.
 - New `src/components/TimeSelect.tsx`: three drop-downs (Hour 12, 1 ... 11 / Minutes 00, 05 ... 55 / AM or PM). Only allowed times can be picked, so no red correction message in normal use.
@@ -19,7 +55,7 @@
 - Not changed: other time boxes that are not visit times (onboarding working hours, customer best time, My Week events).
 - Verification: tests pass (C17 tests replaced by C19 tests). Local build/type check BLOCKED (packages cannot be downloaded). Browser: NOT TESTED.
 
-## 2026-10-12 — C17: 30-minute visit slots (branch fix/c17-half-hour-slots, NOT merged, NOT deployed)
+## 2026-10-12 — C17: 30-minute visit slots (PR #18; merged as fbe091f; replaced by C19)
 
 - Product rule: every saved visit time must be on :00 or :30, in Add stop (including earlier-today logging), Change time and Reschedule.
 - The app's own check blocks off-slot times before any database call; `step={1800}` on time boxes is only a picker hint.
