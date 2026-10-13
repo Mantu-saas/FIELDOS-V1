@@ -1,13 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { todayIST } from '../../lib/format'
 
 type HealthPageProps = { userId: string }
-
-const todayISO = () => {
-  const d = new Date()
-  const offset = d.getTimezoneOffset()
-  return new Date(d.getTime() - offset * 60000).toISOString().slice(0, 10)
-}
 
 const PRESSURES = [
   ['target', '🎯 Target pressure'],
@@ -39,7 +34,8 @@ export default function HealthPage({ userId }: HealthPageProps) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
-  const date = useMemo(() => todayISO(), [])
+  // India date, the same day TODAY and COACH use (not the phone's own time zone)
+  const date = useMemo(() => todayIST(), [])
 
   useEffect(() => {
     let active = true

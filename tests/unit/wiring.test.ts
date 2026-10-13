@@ -58,7 +58,7 @@ test('C10: rescheduling uses the working-hours default and also serves "Reschedu
   assert.match(src, /visit\.status === 'rescheduled'/)
   // existing safeguards are kept
   assert.match(src, /The new time must be in the future\./)
-  assert.match(src, /already has a planned visit on/)
+  assert.match(src, /already has a visit on/)
 })
 
 test('C10: choosing "Rescheduled" leads to planning the replacement, without forcing a follow-up task', () => {
@@ -213,8 +213,10 @@ test('Fix A: COACH counts today\'s visits without cancelled ones', () => {
   assert.match(src, /const todayPlanned = todayAll\.filter\(isPlannedVisit\)/)
 })
 
-test('Fix A: My Week shows only still-planned visits as work', () => {
-  assert.match(read('src/features/myweek/MyWeekPage.tsx'), /setPlannedVisits\(visits\.filter\(visit => visit\.status === 'planned'\)\)/)
+test('Fix A (updated in V1): My Week never shows cancelled visits as work; visited ones count as completed', () => {
+  const src = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(src, /setWeekVisits\(visits\.filter\(isPlannerVisit\)\)/)   // isPlannerVisit excludes cancelled (weekPlan tests)
+  assert.match(src, /dayVisits\.filter\(visit => visit\.status === 'visited'\)\.length/)
 })
 
 // ---------------- Fix B: cancelled sales ----------------
@@ -285,4 +287,35 @@ test('SALES: the "Sale cancelled" note is cleared when you edit or save another 
   const save = src.slice(src.indexOf('async function save'), src.indexOf('async function cancelSale'))
   assert.match(startEdit, /setListMsg\(null\)/)
   assert.match(save, /setListMsg\(null\)/)
+})
+
+// ---------- V1 reliability ----------
+
+test('V1: Change time and Reschedule use the same one-visit-per-day rule as Add stop', () => {
+  for (const file of ['src/features/visits/ChangeVisitTime.tsx', 'src/features/visits/RescheduleVisit.tsx']) {
+    const src = read(file)
+    assert.match(src, /\.in\('status', \[\.\.\.STOP_BLOCKING_STATUSES\]\)/, file)
+    assert.doesNotMatch(src, /\.eq\('status', 'planned'\)\s*\n\s*\.gte\('planned_start'/, `${file}: old planned-only check gone`)
+  }
+  // Reschedule: the original visit never blocks its own replacement
+  assert.match(read('src/features/visits/RescheduleVisit.tsx'), /\.neq\('id', visit\.id\)/)
+  // Change time: the visit being moved never blocks itself
+  assert.match(read('src/features/visits/ChangeVisitTime.tsx'), /\.neq\('id', visit\.id\)/)
+})
+
+test('V1: HEALTH saves and loads the check-in for the India date, like TODAY and COACH', () => {
+  const src = read('src/features/health/HealthPage.tsx')
+  assert.match(src, /useMemo\(\(\) => todayIST\(\), \[\]\)/)
+  assert.doesNotMatch(src, /getTimezoneOffset/)
+})
+
+test('V1: My Week shows one time-ordered list with clash warnings, and events can be cancelled safely', () => {
+  const src = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(src, /dayTimeline<PersonalEvent, WeekVisit, FollowUpRow>\(/)
+  assert.match(src, /dayClashes\(dayEvents, dayVisits, formatTimeIST\)/)
+  assert.match(src, /changeEventStatus\(event, 'cancelled'\)/)
+  assert.match(src, /window\.confirm\(`Cancel "/)
+  assert.match(src, /\.select\('id,status'\)/)                       // the change is confirmed by the database
+  assert.match(src, /data\.length !== 1 \|\| data\[0\]\.status !== nextStatus/)
+  assert.match(src, /setWeekVisits\(visits\.filter\(isPlannerVisit\)\)/)
 })

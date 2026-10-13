@@ -4,6 +4,7 @@ import { todayIST } from '../../lib/format'
 import type { VisitRow } from '../../types'
 import { buildPlannedStart, isTimeSlot, istClockOf, istDateOf, nextDay, SLOT_MESSAGE } from '../../lib/visitTime'
 import TimeSelect from '../../components/TimeSelect'
+import { STOP_BLOCKING_STATUSES } from '../../lib/rules'
 
 // C10: change the date/time of a PLANNED visit in place.
 // Updates only this visit's planned_start. Never deletes or recreates the visit.
@@ -40,13 +41,14 @@ export default function ChangeVisitTime({
 
     setBusy(true)
     try {
-      // Same safeguard as rescheduling: one planned visit per customer per day.
+      // One visit per customer per day (C20 rule): another planned, visited or rescheduled
+      // visit that day blocks the move. Cancelled or unavailable visits do not.
       const dup = await supabase
         .from('visits')
         .select('id')
         .eq('user_id', userId)
         .eq('customer_id', visit.customer_id)
-        .eq('status', 'planned')
+        .in('status', [...STOP_BLOCKING_STATUSES])
         .neq('id', visit.id)
         .gte('planned_start', `${date}T00:00:00+05:30`)
         .lt('planned_start', `${nextDay(date)}T00:00:00+05:30`)
@@ -54,7 +56,7 @@ export default function ChangeVisitTime({
 
       if (dup.error) return setMsg('Could not check your schedule: ' + dup.error.message)
       if ((dup.data ?? []).length > 0) {
-        return setMsg(`${visit.customers?.name ?? 'This customer'} already has another planned visit on ${date}. Choose another date.`)
+        return setMsg(`${visit.customers?.name ?? 'This customer'} already has another visit on ${date}. Choose another date.`)
       }
 
       // Update only this visit, only if it is still planned and still belongs to this user and customer.
