@@ -15,6 +15,8 @@ import type { PersonalEvent } from '../../lib/personalEvents'
 import type { Customer, VisitRow } from '../../types'
 import VisitDetail from '../visits/VisitDetail'
 import FollowUpsView from './FollowUpsView'
+import { removePlannedStop, REMOVE_NOT_PLANNED_MESSAGE } from '../../lib/visitRecord'
+import type { RemoveStopResult } from '../../lib/visitRecord'
 
 const DEFAULT_VISIT_MINUTES = 15
 const EVENT_BUFFER_MINUTES = 60
@@ -296,14 +298,18 @@ export default function RoutePage({
   async function removeStop(id: string) {
     if (!window.confirm("Remove this stop from today's route?")) return
 
-    const { error } = await supabase
-      .from('visits')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', userId)
+    // C21: removes the stop only while it is still planned (never a visit recorded meanwhile)
+    let result: RemoveStopResult
+    try {
+      result = await removePlannedStop(supabase, userId, id)
+    } catch {
+      setMsg('Could not remove the stop. Check your connection and try again.')
+      return
+    }
 
-    if (error) {
-      setMsg('Could not remove: ' + error.message)
+    if (!result.ok) {
+      await load()
+      setMsg(result.reason === 'not_planned' ? REMOVE_NOT_PLANNED_MESSAGE : 'Could not remove: ' + result.message)
       return
     }
 

@@ -1,4 +1,15 @@
 # Changelog
+## 2026-10-13 — C21: safe "Record visit" / "Remove", and rescheduling history kept (branch fix/c21-visit-record-guard, NOT pushed, NOT merged, NOT deployed)
+
+- Found in the Archana / Debasis investigation (read-only). "Rescheduled from 2026-10-11 (Cancelled)" is the replacement visit's own note, written on purpose by Reschedule; the original visit is never changed.
+- Fix 1: "Record visit" now records a visit only while it is still planned and belongs to this user, and confirms exactly one visit changed. Only then are the sale and follow-up added. A visit already recorded (another phone, old screen) shows "This visit was already recorded… Nothing was saved" — no second sale, no second follow-up, no overwritten result.
+- Fix 1: ROUTE "Remove" deletes a stop only while it is still planned. A visit recorded meanwhile is kept and the route refreshes with a message.
+- Fix 2: recording a replacement visit keeps its "Rescheduled from …" line first, with the typed note after it (it used to be erased). The stored wording is unchanged, so existing visits still match.
+- Fix 2: My Week and the visit screen show it in plain words: "Moved here from Sun 11 Oct. That visit was cancelled."
+- New: src/lib/visitRecord.ts, src/lib/visitHistory.ts (+ tests). No database, migration or Supabase change.
+- Verification: 153/153 tests pass (120 existing + 33 new; 3 older text checks moved to the new file location). Strict type check of the new files and syntax check of every changed file pass. Full build/type check BLOCKED (packages cannot be downloaded). Browser: NOT TESTED.
+## 2026-10-12 — C20: one visit per customer per day + SALES message fix (same branch as C19, NOT merged, NOT deployed)
+
 ## 2026-10-13 — V1 reliability: My Week timeline, one-visit-per-day everywhere, HEALTH date (branch fix/v1-reliability, NOT merged, NOT deployed)
 
 - My Week: each day is now ONE list in time order — all-day events, then events and visits by start time, then follow-ups due that day (new `src/lib/weekPlan.ts`). Before, events, visits and follow-ups were shown in three separate groups.

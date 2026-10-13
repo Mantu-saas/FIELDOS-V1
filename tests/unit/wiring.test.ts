@@ -151,18 +151,23 @@ test('C18: duplicate-visit count is loaded from the database, scoped like the sa
 })
 
 test('C18: visit detail writes the same note the matching rule looks for', () => {
+  // C21: the sale is written by lib/visitRecord.ts, with the note passed in by the screen
   const src = read('src/features/visits/VisitDetail.tsx')
-  assert.match(src, /notes: VISIT_SALE_NOTE/)
+  assert.match(src, /saleNote: VISIT_SALE_NOTE/)
   assert.doesNotMatch(src, /notes: 'From visit'/)
+  assert.match(read('src/lib/visitRecord.ts'), /notes: input\.saleNote/)
 })
 
 test('C18: visit sale date and actual_start come from the same moment (midnight-safe)', () => {
+  // C21: the screen works out `now` and `saleDate` once and passes both to lib/visitRecord.ts
   const src = read('src/features/visits/VisitDetail.tsx')
   assert.match(src, /const now = new Date\(\)\.toISOString\(\)/)
-  assert.match(src, /actual_start: now/)
   assert.match(src, /const saleDate = istDateOf\(now\)/)
-  assert.match(src, /sale_date: saleDate/)
+  assert.match(src, /now, saleDate, saleNote/)
   assert.doesNotMatch(src, /sale_date: today/)
+  const lib = read('src/lib/visitRecord.ts')
+  assert.match(lib, /actual_start: input\.now/)
+  assert.match(lib, /sale_date: input\.saleDate/)
 })
 
 test('C18: ROUTE, visit detail and COACH show a visit\'s sale through the shared rule', () => {
@@ -200,8 +205,12 @@ test('Fix A: ROUTE numbers, gaps and navigation use only active visits; cancelle
   assert.match(src, /Cancelled today \(\{cancelledVisits\.length\}\)/)
   assert.match(src, /cancelledVisits\.map\(visit =>[\s\S]*?onClick=\{\(\) => setSelected\(visit\.id\)\}[\s\S]*?CANCELLED/)
   assert.match(src, /const selectedVisit = visits\.find/)           // opening uses the full list
-  // no new deletes: cancelling never removes data
-  assert.equal((src.match(/\.delete\(\)/g) ?? []).length, 1)        // only the existing "Remove planned stop"
+  // no new deletes: cancelling never removes data. C21: the only delete ("Remove planned stop")
+  // now lives in lib/visitRecord.ts and only removes a visit that is still planned.
+  assert.equal((src.match(/\.delete\(\)/g) ?? []).length, 0)
+  const lib = read('src/lib/visitRecord.ts')
+  assert.equal((lib.match(/\.delete\(\)/g) ?? []).length, 1)
+  assert.match(lib, /\.delete\(\)\s*\.eq\('id', visitId\)\s*\.eq\('user_id', userId\)\s*\.eq\('status', 'planned'\)/)
 })
 
 test('Fix A: COACH counts today\'s visits without cancelled ones', () => {
@@ -318,4 +327,49 @@ test('V1: My Week shows one time-ordered list with clash warnings, and events ca
   assert.match(src, /\.select\('id,status'\)/)                       // the change is confirmed by the database
   assert.match(src, /data\.length !== 1 \|\| data\[0\]\.status !== nextStatus/)
   assert.match(src, /setWeekVisits\(visits\.filter\(isPlannerVisit\)\)/)
+})
+
+// ---------- C21: safe record/remove and rescheduling history ----------
+
+test('C21: Record visit goes through recordVisit only (no direct visit update or sale insert on the screen)', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.match(src, /recordVisit\(supabase, \{/)
+  assert.doesNotMatch(src, /\.from\('visits'\)\.update\(/)
+  assert.doesNotMatch(src, /\.from\('sales'\)\.insert\(/)
+  assert.doesNotMatch(src, /\.from\('follow_ups'\)\.insert\(/)
+  assert.match(src, /ALREADY_RECORDED_MESSAGE/)
+  assert.match(src, /if \(busy\) return/)
+})
+
+test('C21: recordVisit only updates a still-planned visit of this user and checks one row changed', () => {
+  const src = read('src/lib/visitRecord.ts')
+  const fn = src.slice(src.indexOf('export async function recordVisit'), src.indexOf('export type RemoveStopResult'))
+  assert.match(fn, /\.eq\('user_id', input\.userId\)/)
+  assert.match(fn, /\.eq\('status', 'planned'\)/)
+  assert.ok(fn.indexOf("update.data.length !== 1") < fn.indexOf(".from('sales')"), 'row check before the sale')
+})
+
+test('C21: Remove on ROUTE goes through removePlannedStop (never deletes a recorded visit)', () => {
+  const src = read('src/features/route/RoutePage.tsx')
+  assert.match(src, /removePlannedStop\(supabase, userId, id\)/)
+  assert.doesNotMatch(src, /\.delete\(\)/)
+})
+
+test('C21: recording keeps the rescheduling history line', () => {
+  assert.match(read('src/features/visits/VisitDetail.tsx'), /notes: notesAfterRecording\(visit\.notes, notes\)/)
+})
+
+test('C21: Reschedule saves the history line with the shared helper', () => {
+  const src = read('src/features/visits/RescheduleVisit.tsx')
+  assert.match(src, /const marker = rescheduleMarker\(/)
+  assert.match(src, /\.eq\('notes', marker\)/)
+})
+
+test('C21: My Week and the visit screen show history in plain words, not the raw stored text', () => {
+  const week = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(week, /visitNoteLines\(visit\.notes\)/)
+  assert.doesNotMatch(week, /\{visit\.notes\}/)
+  const detail = read('src/features/visits/VisitDetail.tsx')
+  assert.doesNotMatch(detail, /\{visit\.notes\}/)
+  assert.match(detail, /visitNoteLines\(pre\.lastVisit\.notes\)/)
 })

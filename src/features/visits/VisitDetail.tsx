@@ -7,6 +7,9 @@ import { VISIT_SALE_NOTE, visitSaleLabel } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
 import RescheduleVisit from './RescheduleVisit'
 import ChangeVisitTime from './ChangeVisitTime'
+import { ALREADY_RECORDED_MESSAGE, recordVisit } from '../../lib/visitRecord'
+import type { RecordVisitResult } from '../../lib/visitRecord'
+import { notesAfterRecording, visitNoteLines } from '../../lib/visitHistory'
 
 type Pre = {
   potential: number; priority: number
@@ -55,6 +58,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
   }, [visit.customer_id])
 
   async function save() {
+    if (busy) return
     setMsg('')
     const saleN = sale === '' ? 0 : Number(sale), leadN = lead === '' ? 0 : Number(lead), collN = coll === '' ? 0 : Number(coll)
     if (![saleN, leadN, collN].every(n => Number.isFinite(n) && n >= 0)) return setMsg('Amounts must be numbers (0 or more).')
@@ -66,27 +70,29 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
     // fall on the same India date. (`today` is fixed when the screen last redrew, which can be
     // before midnight while Save is tapped after it.)
     const saleDate = istDateOf(now) ?? todayIST()
-    const u = await supabase.from('visits').update({
-      status, sale_amount: saleN, lead_amount: leadN, collection_amount: collN,
-      notes: notes.trim() || null, next_action: nextAction.trim() || null, follow_up_date: fuDate || null,
-      actual_start: now, actual_end: now
-    }).eq('id', visit.id)
-    if (u.error) { setBusy(false); return setMsg('Could not save the visit: ' + u.error.message) }
-
-    const problems: string[] = []
-    if (saleN > 0) {
-      const r = await supabase.from('sales').insert({ user_id: userId, customer_id: visit.customer_id, sale_date: saleDate, amount: saleN, notes: VISIT_SALE_NOTE })
-      if (r.error) problems.push('the sale (' + r.error.message + ')')
-    }
-    if (fuDate) {
-      const r = await supabase.from('follow_ups').insert({
-        user_id: userId, customer_id: visit.customer_id, due_date: fuDate,
-        action: nextAction.trim() || 'Follow up', expected_value: leadN, notes: notes.trim() || null
+    let result: RecordVisitResult
+    try {
+      // C21: only a visit that is still planned is recorded; the sale and follow-up are added
+      // only after the database confirms that exactly this one visit changed.
+      result = await recordVisit(supabase, {
+        userId, visitId: visit.id, customerId: visit.customer_id, status,
+        saleAmount: saleN, leadAmount: leadN, collectionAmount: collN,
+        // C21: a "Rescheduled from …" history line on this visit is kept, with the typed note after it
+        notes: notesAfterRecording(visit.notes, notes),
+        nextAction: nextAction.trim() || null, followUpDate: fuDate || null,
+        followUpAction: nextAction.trim() || 'Follow up', followUpNotes: notes.trim() || null,
+        now, saleDate, saleNote: VISIT_SALE_NOTE
       })
-      if (r.error) problems.push('the follow-up (' + r.error.message + ')')
+    } catch {
+      setBusy(false)
+      return setMsg('Something went wrong while saving. Go back to the route and check this visit before trying again.')
     }
     setBusy(false)
-    if (problems.length) return setMsg('Visit saved, but these did not save: ' + problems.join(' and ') + '. Add them manually in SALES or Follow-ups. Do not save this visit again.')
+    if (!result.ok) {
+      if (result.reason === 'not_planned') return setMsg(ALREADY_RECORDED_MESSAGE)
+      return setMsg('Could not save the visit: ' + result.message)
+    }
+    if (result.problems.length) return setMsg('Visit saved, but these did not save: ' + result.problems.join(' and ') + '. Add them manually in SALES or Follow-ups. Do not save this visit again.')
     if (status === 'rescheduled') return setPlanReplacement(true)
     onSaved()
   }
@@ -111,6 +117,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
       <div className="card">
         <button className="link" style={{ textAlign: 'left' }} onClick={onBack}>← Back to route</button>
         <h2>{name}</h2>
+        {!done && visitNoteLines(visit.notes).map((line, i) => <p className="small" key={i}>{line}</p>)}
         <div className="row">
           {visit.customers?.address && <a className="btn" target="_blank" rel="noopener noreferrer" href={'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(visit.customers.address)}>Navigate</a>}
           {visit.customers?.phone && <a className="btn" href={'tel:' + visit.customers.phone}>Call</a>}
@@ -122,7 +129,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
         {!pre ? <p>Loading…</p> : <>
           <p><b>Why this customer:</b> priority {pre.priority} (1 = highest), potential {inr(pre.potential)} per month.</p>
           <p><b>Last sale:</b> {pre.lastSale ? `${inr(Number(pre.lastSale.amount))} on ${pre.lastSale.sale_date}` : 'None recorded yet'}</p>
-          <p><b>Last visit:</b> {pre.lastVisit ? `${pre.lastVisit.status}${pre.lastVisit.notes ? ' - ' + pre.lastVisit.notes : ''}` : 'No visit recorded yet'}</p>
+          <p><b>Last visit:</b> {pre.lastVisit ? [pre.lastVisit.status, ...visitNoteLines(pre.lastVisit.notes)].join(' - ') : 'No visit recorded yet'}</p>
           {pre.followUps.length > 0
             ? <p><b>Open follow-ups:</b> {pre.followUps.map(f => `${f.action} (due ${f.due_date}${f.expected_value > 0 ? ', ' + inr(Number(f.expected_value)) : ''})`).join('; ')}</p>
             : <p><b>Open follow-ups:</b> none</p>}
@@ -137,7 +144,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
           {Number(visit.sale_amount) > 0 && <p><b>{visitSaleLabel(saleState ?? 'not_found', inr(Number(visit.sale_amount)))}</b></p>}
           {visit.lead_amount > 0 && <p><b>Opportunity:</b> {inr(Number(visit.lead_amount))}</p>}
           {visit.collection_amount > 0 && <p><b>Collection:</b> {inr(Number(visit.collection_amount))}</p>}
-          {visit.notes && <p><b>Note:</b> {visit.notes}</p>}
+          {visitNoteLines(visit.notes).map((line, i) => <p key={i}><b>{i === 0 ? 'Note:' : ''}</b> {line}</p>)}
           {visit.next_action && <p><b>Next action:</b> {visit.next_action}</p>}
           {visit.follow_up_date && <p><b>Follow-up date:</b> {visit.follow_up_date}</p>}
           <p className="small">A recorded visit cannot be edited here. If something is wrong, fix the sale in SALES or the follow-up in Follow-ups.</p>

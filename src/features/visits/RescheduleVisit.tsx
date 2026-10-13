@@ -13,6 +13,7 @@ import {
 } from '../../lib/visitTime'
 import TimeSelect from '../../components/TimeSelect'
 import { STOP_BLOCKING_STATUSES } from '../../lib/rules'
+import { rescheduleMarker } from '../../lib/visitHistory'
 
 const IST = 'Asia/Kolkata'
 
@@ -113,8 +114,8 @@ export default function RescheduleVisit({
 
   const label = eligible ? STATUS_LABEL[visit.status] : ''
 
-  const marker =
-    `Rescheduled from ${istDay(visit.planned_start) ?? today} (${label})`
+  // History line saved on the replacement visit (wording unchanged; see lib/visitHistory.ts)
+  const marker = rescheduleMarker(istDay(visit.planned_start) ?? today, label)
 
   useEffect(() => {
     if (!eligible) return
