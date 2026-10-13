@@ -6,6 +6,7 @@
 - Visit detail: a visit planned for a future day can be moved (Change time or date) or removed, but not recorded ahead of time; the screen and the save both refuse.
 - Customers: "Edit customer" (name, type, phone, address, potential, priority, best time, and a new Notes field). Saves only this user's customer and reports success only when the database confirms it.
 - TODAY: the "Plan tomorrow" hint now matches ROUTE ("ROUTE, then Next").
+- My Week: each planned doctor visit has "Change time or date" right under it, so a visit can be moved to another day or time without going to ROUTE (same safe move as ROUTE: same visit, never copied, blocked if that doctor is already booked that day).
 - No database change. Verification: 190/190 unit tests pass; full build and browser not yet run (the Cloudflare preview builds it).
 
 ## 2026-10-13 — R1: pilot release (branch release/r1-pilot, NOT merged, NOT deployed)

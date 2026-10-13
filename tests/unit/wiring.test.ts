@@ -436,3 +436,13 @@ test('R2: customers can be edited, only the user\'s own, and success needs the d
   assert.match(src, /notes: f\.notes\.trim\(\) \|\| null/)            // notes can finally be saved
   assert.doesNotMatch(save, /notes: null/)
 })
+
+test('R2: My Week lets a planned doctor visit be moved in place, with the same safe Change time box as ROUTE', () => {
+  const src = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(src, /import ChangeVisitTime from '\.\.\/visits\/ChangeVisitTime'/)
+  assert.match(src, /\{visit\.status === 'planned' && \(\s*<ChangeVisitTime userId=\{profile\.id\} visit=\{asVisitRow\} onSaved=\{\(\) => \{ void load\(\) \}\} \/>/)
+  // the move itself stays in ChangeVisitTime: only this user's, only while still planned, confirmed by the database
+  const move = read('src/features/visits/ChangeVisitTime.tsx')
+  assert.match(move, /\.eq\('id', visit\.id\)\s*\.eq\('user_id', userId\)\s*\.eq\('customer_id', visit\.customer_id\)\s*\.eq\('status', 'planned'\)/)
+  assert.match(move, /result\.data\.length !== 1/)
+})
