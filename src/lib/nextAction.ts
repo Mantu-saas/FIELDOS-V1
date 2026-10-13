@@ -110,5 +110,5 @@ export function nextAction(input: {
   }
 
   // 5. Nothing left
-  return { ...base, kind: 'done', title: "Today's plan is done", reason: 'No visits left and no follow-ups due. Plan tomorrow in ROUTE.' }
+  return { ...base, kind: 'done', title: "Today's plan is done", reason: 'No visits left and no follow-ups due. Plan tomorrow: ROUTE, then Next ›.' }
 }

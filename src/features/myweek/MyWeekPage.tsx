@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Profile } from '../../types'
+import type { Profile, VisitRow } from '../../types'
 import {
   addDaysStr,
   istDate,
@@ -15,6 +15,7 @@ import { activeSales, activeSalesTotal } from '../../lib/rules'
 import { dayClashes, dayTimeline, isPlannerVisit } from '../../lib/weekPlan'
 import EventForm from './EventForm'
 import { visitNoteLines } from '../../lib/visitHistory'
+import ChangeVisitTime from '../visits/ChangeVisitTime'
 
 const cap = (s: string) =>
   s.charAt(0).toUpperCase() + s.slice(1)
@@ -561,8 +562,25 @@ export default function MyWeekPage({
                   const visit = entry.item
                   const done = visit.status === 'visited'
 
+                  // R2: a planned doctor visit can be moved to another day or time right here,
+                  // with the same "Change time or date" used in ROUTE (moves the same visit, never copies it)
+                  const asVisitRow: VisitRow = {
+                    id: visit.id,
+                    customer_id: visit.customer_id,
+                    planned_start: visit.planned_start,
+                    status: visit.status,
+                    sale_amount: 0,
+                    lead_amount: 0,
+                    collection_amount: 0,
+                    notes: visit.notes,
+                    next_action: null,
+                    follow_up_date: null,
+                    customers: { name: visit.name, address: null, phone: null }
+                  }
+
                   return (
-                    <div key={entry.key} className="line" style={rowStyle}>
+                    <div key={entry.key}>
+                    <div className="line" style={rowStyle}>
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <b style={done ? { textDecoration: 'line-through' } : undefined}>
                           Visit: {visit.name}
@@ -582,6 +600,10 @@ export default function MyWeekPage({
                       <span style={{ textAlign: 'right', flexShrink: 0 }}>
                         <span className="small">{formatTimeIST(visit.planned_start)}</span>
                       </span>
+                    </div>
+                    {visit.status === 'planned' && (
+                      <ChangeVisitTime userId={profile.id} visit={asVisitRow} onSaved={() => { void load() }} />
+                    )}
                     </div>
                   )
                 }

@@ -46,8 +46,9 @@ test('C10: ROUTE add-stop requires a time and never falls back to "now"', () => 
   const addStop = src.slice(src.indexOf('async function addStop'), src.indexOf('async function removeStop'))
   assert.doesNotMatch(addStop, /new Date\(\)\.toISOString\(\)/)
   assert.match(addStop, /if \(!isValidClock\(time\)\)/)
-  assert.match(addStop, /buildPlannedStart\(today, time\)/)
-  assert.match(src, /setTime\(nextSlotToday\(\)\)/)
+  // R2: the stop is planned on the day shown in ROUTE (today by default)
+  assert.match(addStop, /buildPlannedStart\(day, time\)/)
+  assert.match(src, /setTime\(isToday \? nextSlotToday\(\) : suggestRescheduleTime\(null, workingHours\(workStart, workEnd\)\)\)/)
   assert.doesNotMatch(src, /Planned time \(optional\)/)
 })
 
@@ -202,7 +203,7 @@ test('Fix A: ROUTE numbers, gaps and navigation use only active visits; cancelle
   assert.match(src, /const pending = workVisits/)                   // Google Maps stops
   assert.doesNotMatch(src, /\bvisits\.map\(\(visit, index\)/)
   // cancelled visits stay visible, clearly marked, and can be opened (to reschedule)
-  assert.match(src, /Cancelled today \(\{cancelledVisits\.length\}\)/)
+  assert.match(src, /Cancelled \{isToday \? 'today' : label\} \(\{cancelledVisits\.length\}\)/)
   assert.match(src, /cancelledVisits\.map\(visit =>[\s\S]*?onClick=\{\(\) => setSelected\(visit\.id\)\}[\s\S]*?CANCELLED/)
   assert.match(src, /const selectedVisit = visits\.find/)           // opening uses the full list
   // no new deletes: cancelling never removes data. C21: the only delete ("Remove planned stop")
@@ -403,4 +404,45 @@ test('R1: still no location tracking anywhere in the app', () => {
   for (const f of files.filter(f => f.endsWith('.tsx'))) {
     assert.doesNotMatch(read('src/features/' + f), /navigator\.geolocation/, f)
   }
+})
+
+// ---------- R2: plan other days, edit customers ----------
+
+test('R2: ROUTE loads, adds and re-checks visits for the day shown, not only today', () => {
+  const src = read('src/features/route/RoutePage.tsx')
+  assert.match(src, /const \[day, setDay\] = useState\(today\)/)
+  assert.ok((src.match(/\.gte\('planned_start', `\$\{day\}T00:00:00\+05:30`\)/g) ?? []).length === 2, 'load and add-stop re-check both use the chosen day')
+  assert.doesNotMatch(src, /\$\{today\}T00:00:00/)
+  assert.match(src, /if \(!canAddStopOn\(day, today\)\)/)            // no stops added on past days
+  assert.match(src, /\) : canAddStopOn\(day, today\) \? \(/)            // the button is hidden on past days
+  assert.match(src, /recordable=\{canRecordOn\(day, today\)\}/)
+  assert.match(src, /setDay\(shiftDay\(day, -1\)\)/)
+  assert.match(src, /setDay\(shiftDay\(day, 1\)\)/)
+})
+
+test('R2: a future visit cannot be recorded ahead of time (screen and save both refuse)', () => {
+  const src = read('src/features/visits/VisitDetail.tsx')
+  assert.match(src, /recordable = true/)
+  assert.match(src, /\{!recordable \? \(/)
+  assert.match(src, /if \(!recordable\) return setMsg\('Record this visit on the day it is planned\.'\)/)
+})
+
+test('R2: customers can be edited, only the user\'s own, and success needs the database\'s confirmation', () => {
+  const src = read('src/features/customers/CustomersView.tsx')
+  const save = src.slice(src.indexOf('async function save'), src.indexOf('async function archive'))
+  assert.match(save, /\.update\(details\)\s*\.eq\('id', editingId\)\s*\.eq\('user_id', userId\)\s*\.select\('id'\)/)
+  assert.match(save, /data\.length !== 1/)
+  assert.match(src, /Edit customer/)
+  assert.match(src, /notes: f\.notes\.trim\(\) \|\| null/)            // notes can finally be saved
+  assert.doesNotMatch(save, /notes: null/)
+})
+
+test('R2: My Week lets a planned doctor visit be moved in place, with the same safe Change time box as ROUTE', () => {
+  const src = read('src/features/myweek/MyWeekPage.tsx')
+  assert.match(src, /import ChangeVisitTime from '\.\.\/visits\/ChangeVisitTime'/)
+  assert.match(src, /\{visit\.status === 'planned' && \(\s*<ChangeVisitTime userId=\{profile\.id\} visit=\{asVisitRow\} onSaved=\{\(\) => \{ void load\(\) \}\} \/>/)
+  // the move itself stays in ChangeVisitTime: only this user's, only while still planned, confirmed by the database
+  const move = read('src/features/visits/ChangeVisitTime.tsx')
+  assert.match(move, /\.eq\('id', visit\.id\)\s*\.eq\('user_id', userId\)\s*\.eq\('customer_id', visit\.customer_id\)\s*\.eq\('status', 'planned'\)/)
+  assert.match(move, /result\.data\.length !== 1/)
 })

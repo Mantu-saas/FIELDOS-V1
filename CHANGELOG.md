@@ -1,4 +1,14 @@
 # Changelog
+## 2026-10-13 — R2: plan other days, edit customers (branch release/r2-plan-edit, NOT merged, NOT deployed)
+
+- Asked by the founder on day 1 of real use: plan doctors on other days, and edit what was entered.
+- ROUTE: day switcher (Previous · day · Next, "Back to today"). Stops can be added for today or any future day; past days show what was planned and recorded. Loading, adding and the one-visit-per-day re-check all use the day shown.
+- Visit detail: a visit planned for a future day can be moved (Change time or date) or removed, but not recorded ahead of time; the screen and the save both refuse.
+- Customers: "Edit customer" (name, type, phone, address, potential, priority, best time, and a new Notes field). Saves only this user's customer and reports success only when the database confirms it.
+- TODAY: the "Plan tomorrow" hint now matches ROUTE ("ROUTE, then Next").
+- My Week: each planned doctor visit has "Change time or date" right under it, so a visit can be moved to another day or time without going to ROUTE (same safe move as ROUTE: same visit, never copied, blocked if that doctor is already booked that day).
+- No database change. Verification: 190/190 unit tests pass; full build and browser not yet run (the Cloudflare preview builds it).
+
 ## 2026-10-13 — R1: pilot release (branch release/r1-pilot, NOT merged, NOT deployed)
 
 - Combines fix/v1-reliability and C21 (fix/c21-visit-record-guard); their 4 overlapping files were resolved by keeping both sides.
