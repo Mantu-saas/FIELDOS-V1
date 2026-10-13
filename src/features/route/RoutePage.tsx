@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { inr, todayIST, timeIST } from '../../lib/format'
-import { buildPlannedStart, isTimeSlot, isValidClock, nextSlotToday, SLOT_MESSAGE } from '../../lib/visitTime'
+import { buildPlannedStart, isTimeSlot, isValidClock, nextSlotToday, SLOT_MESSAGE, suggestRescheduleTime, workingHours } from '../../lib/visitTime'
+import { canAddStopOn, canRecordOn, dayLabel, shiftDay } from '../../lib/routeDay'
 import TimeSelect from '../../components/TimeSelect'
 import { blocksNewStopToday, sameDayVisitMessage, splitCancelledVisits, STOP_BLOCKING_STATUSES, visitSaleLabel, visitSaleStates } from '../../lib/rules'
 import type { VisitSaleState } from '../../lib/rules'
@@ -142,6 +143,11 @@ export default function RoutePage({
   const [visitSalesError, setVisitSalesError] = useState('')
 
   const today = todayIST()
+  // R2: the day shown on ROUTE (today by default). Past days are for looking back;
+  // today and future days can be planned.
+  const [day, setDay] = useState(today)
+  const isToday = day === today
+  const label = dayLabel(day, today)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -153,8 +159,8 @@ export default function RoutePage({
         .from('visits')
         .select(SELECT)
         .eq('user_id', userId)
-        .gte('planned_start', `${today}T00:00:00+05:30`)
-        .lte('planned_start', `${today}T23:59:59+05:30`)
+        .gte('planned_start', `${day}T00:00:00+05:30`)
+        .lt('planned_start', `${shiftDay(day, 1)}T00:00:00+05:30`)
         .order('planned_start', { ascending: true }),
 
       supabase
@@ -163,11 +169,11 @@ export default function RoutePage({
         .eq('active', true)
         .order('name'),
 
-      loadWeekEvents(userId, weekStartMonday(today))
+      loadWeekEvents(userId, weekStartMonday(day))
     ])
 
     if (v.error) {
-      setMsg("Could not load today's route: " + v.error.message)
+      setMsg('Could not load the route: ' + v.error.message)
     } else {
       const loaded = (v.data ?? []) as unknown as RouteVisit[]
       // C18: load the visit sales first, then show visits and their sale status together
@@ -194,14 +200,14 @@ export default function RoutePage({
       setEvents(
         personal.events.filter(
           event =>
-            istDate(new Date(event.starts_at)) === today &&
+            istDate(new Date(event.starts_at)) === day &&
             event.status !== 'cancelled'
         )
       )
     }
 
     setLoading(false)
-  }, [today, userId])
+  }, [day, userId])
 
   useEffect(() => {
     void load()
@@ -240,7 +246,13 @@ export default function RoutePage({
       return
     }
 
-    const plannedStart = buildPlannedStart(today, time)
+    // R2: only today or a future day can be planned
+    if (!canAddStopOn(day, today)) {
+      setMsg('Stops can only be added for today or a future day.')
+      return
+    }
+
+    const plannedStart = buildPlannedStart(day, time)
 
     if (!plannedStart) {
       setMsg('Please enter a valid time.')
@@ -258,13 +270,13 @@ export default function RoutePage({
       .eq('user_id', userId)
       .eq('customer_id', custId)
       .in('status', [...STOP_BLOCKING_STATUSES])
-      .gte('planned_start', `${today}T00:00:00+05:30`)
-      .lte('planned_start', `${today}T23:59:59+05:30`)
+      .gte('planned_start', `${day}T00:00:00+05:30`)
+      .lt('planned_start', `${shiftDay(day, 1)}T00:00:00+05:30`)
       .limit(1)
 
     if (existing.error) {
       setSaving(false)
-      setMsg('Could not check today\'s route: ' + existing.error.message + '. The stop was not added.')
+      setMsg('Could not check the route: ' + existing.error.message + '. The stop was not added.')
       return
     }
 
@@ -296,7 +308,7 @@ export default function RoutePage({
   }
 
   async function removeStop(id: string) {
-    if (!window.confirm("Remove this stop from today's route?")) return
+    if (!window.confirm('Remove this stop from the route?')) return
 
     // C21: removes the stop only while it is still planned (never a visit recorded meanwhile)
     let result: RemoveStopResult
@@ -326,6 +338,7 @@ export default function RoutePage({
       <VisitDetail
         userId={userId}
         visit={selectedVisit}
+        recordable={canRecordOn(day, today)}
         saleState={saleStateOf(selectedVisit)}
         workStart={workStart}
         workEnd={workEnd}
@@ -412,7 +425,7 @@ export default function RoutePage({
           className={sub === 'route' ? 'on' : ''}
           onClick={() => setSub('route')}
         >
-          Today's route
+          Route
         </button>
         <button
           className={sub === 'followups' ? 'on' : ''}
@@ -426,6 +439,21 @@ export default function RoutePage({
         <FollowUpsView userId={userId} />
       ) : (
         <>
+          {/* R2: day switcher: look back, see today, plan ahead */}
+          <div className="card">
+            <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <button className="link" aria-label="Previous day" onClick={() => { setDay(shiftDay(day, -1)); setAdding(false) }}>‹ Previous</button>
+              <b>{label}</b>
+              <button className="link" aria-label="Next day" onClick={() => { setDay(shiftDay(day, 1)); setAdding(false) }}>Next ›</button>
+            </div>
+            {!isToday && (
+              <button className="link" onClick={() => { setDay(today); setAdding(false) }}>Back to today</button>
+            )}
+            {day < today && (
+              <p className="small">Looking back: past days show what was planned and recorded.</p>
+            )}
+          </div>
+
           <div className="card">
             <h2>Visit planning</h2>
             <p className="small">
@@ -481,7 +509,7 @@ export default function RoutePage({
               {msg && <p className="msg">{msg}</p>}
 
               <button className="primary" disabled={saving} onClick={addStop}>
-                {saving ? 'Saving…' : 'Add to today'}
+                {saving ? 'Saving…' : isToday ? 'Add to today' : `Add to ${label}`}
               </button>
               <button
                 className="link"
@@ -493,18 +521,19 @@ export default function RoutePage({
                 Cancel
               </button>
             </div>
-          ) : (
+          ) : canAddStopOn(day, today) ? (
             <button
               className="primary"
               onClick={() => {
                 setAdding(true)
-                setTime(nextSlotToday())
+                // today: the next 5-minute step; a future day: the start of the working day
+                setTime(isToday ? nextSlotToday() : suggestRescheduleTime(null, workingHours(workStart, workEnd)))
                 setMsg('')
               }}
             >
               + Add stop
             </button>
-          )}
+          ) : null}
 
           {!adding && msg && <p className="msg">{msg}</p>}
 
@@ -528,8 +557,10 @@ export default function RoutePage({
             <div className="card">
               <p>
                 {cancelledVisits.length > 0
-                  ? 'No active stops for today. Tap "Add stop".'
-                  : 'No stops for today yet. Tap "Add stop".'}
+                  ? `No active stops for ${isToday ? 'today' : label}.`
+                  : day < today
+                    ? `No stops were planned for ${label}.`
+                    : `No stops for ${isToday ? 'today' : label} yet. Tap "Add stop".`}
               </p>
               <p className="small">
                 Stops are ordered by planned time. Automatic route
@@ -617,9 +648,9 @@ export default function RoutePage({
 
           {!loading && cancelledVisits.length > 0 && (
             <div className="card">
-              <h2>Cancelled today ({cancelledVisits.length})</h2>
+              <h2>Cancelled {isToday ? 'today' : label} ({cancelledVisits.length})</h2>
               <p className="small">
-                Not part of today's work. Kept for your history; tap one to reschedule it.
+                Not part of the day's work. Kept for your history; tap one to reschedule it.
               </p>
               {cancelledVisits.map(visit => (
                 <div

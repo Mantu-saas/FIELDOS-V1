@@ -22,7 +22,9 @@ const num = (s: string) => s.replace(/[^0-9.]/g, '')
 
 // saleState (C18): whether the sale entered on this visit still counts in SALES. Worked out by ROUTE
 // with the shared rule in lib/rules.ts; when missing, the screen says "check SALES" instead of guessing.
-export default function VisitDetail({ userId, visit, saleState, onBack, onSaved, workStart, workEnd }: { userId: string; visit: VisitRow; saleState?: VisitSaleState; onBack: () => void; onSaved: () => void; workStart?: string | null; workEnd?: string | null }) {
+// recordable (R2): false for a visit planned on a future day; it can be moved or removed, but its
+// result is recorded on the day itself. Defaults to true (today's ROUTE).
+export default function VisitDetail({ userId, visit, saleState, onBack, onSaved, workStart, workEnd, recordable = true }: { userId: string; visit: VisitRow; saleState?: VisitSaleState; onBack: () => void; onSaved: () => void; workStart?: string | null; workEnd?: string | null; recordable?: boolean }) {
   const [pre, setPre] = useState<Pre | null>(null)
   const [status, setStatus] = useState('visited')
   const [sale, setSale] = useState('')
@@ -59,6 +61,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
 
   async function save() {
     if (busy) return
+    if (!recordable) return setMsg('Record this visit on the day it is planned.')
     setMsg('')
     const saleN = sale === '' ? 0 : Number(sale), leadN = lead === '' ? 0 : Number(lead), collN = coll === '' ? 0 : Number(coll)
     if (![saleN, leadN, collN].every(n => Number.isFinite(n) && n >= 0)) return setMsg('Amounts must be numbers (0 or more).')
@@ -155,6 +158,12 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
       ) : (
         <>
         <ChangeVisitTime userId={userId} visit={visit} onSaved={onSaved} />
+        {!recordable ? (
+          <div className="card">
+            <h2>Record visit</h2>
+            <p className="small">This visit is planned for a future day. You can change its time or date above; record the result on the day of the visit.</p>
+          </div>
+        ) : (
         <div className="card">
           <h2>Record visit</h2>
           <label>Result
@@ -175,6 +184,7 @@ export default function VisitDetail({ userId, visit, saleState, onBack, onSaved,
           {msg && <p className="msg">{msg}</p>}
           <button className="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save visit'}</button>
         </div>
+        )}
         </>
       )}
     </div>

@@ -24,6 +24,8 @@ export default function CustomersView({
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
+  // R2: the customer being edited (null = adding a new one)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [f, setF] = useState(empty)
   const [msg, setMsg] = useState('')
@@ -82,19 +84,45 @@ export default function CustomersView({
 
     setBusy(true)
 
+    const details = {
+      name: f.name.trim(),
+      customer_type: f.type.trim() || null,
+      phone: f.phone.trim() || null,
+      address: f.address.trim() || null,
+      potential_amount: pot,
+      priority: Number(f.priority),
+      usual_availability: f.availability || null,
+      notes: f.notes.trim() || null
+    }
+
+    if (editingId) {
+      // R2: edit only this user's customer, and only report success when the database confirms it
+      const { data, error } = await supabase
+        .from('customers')
+        .update(details)
+        .eq('id', editingId)
+        .eq('user_id', userId)
+        .select('id')
+
+      setBusy(false)
+
+      if (error) return setMsg('Could not save changes: ' + error.message)
+      if (!data || data.length !== 1) {
+        return setMsg('The changes were not confirmed. The customer may have been removed. Go back and check before trying again.')
+      }
+
+      const savedId = editingId
+      setF(empty)
+      setEditingId(null)
+      setAdding(false)
+      await load()
+      setSelected(savedId)   // back to the customer's page, showing the new details
+      return
+    }
+
     const { error } = await supabase
       .from('customers')
-      .insert({
-        user_id: userId,
-        name: f.name.trim(),
-        customer_type: f.type.trim() || null,
-        phone: f.phone.trim() || null,
-        address: f.address.trim() || null,
-        potential_amount: pot,
-        priority: Number(f.priority),
-        usual_availability: f.availability || null,
-        notes: null
-      })
+      .insert({ user_id: userId, ...details })
 
     setBusy(false)
 
@@ -226,6 +254,29 @@ export default function CustomersView({
 
         {msg && <p className="msg">{msg}</p>}
 
+        {/* R2: edit this customer's details */}
+        <button
+          className="primary"
+          onClick={() => {
+            setF({
+              name: sel.name ?? '',
+              type: sel.customer_type ?? '',
+              phone: sel.phone ?? '',
+              address: sel.address ?? '',
+              potential: sel.potential_amount ? String(sel.potential_amount) : '',
+              priority: String(sel.priority ?? 3),
+              availability: sel.usual_availability ?? '',
+              notes: sel.notes ?? ''
+            })
+            setEditingId(sel.id)
+            setSelected(null)
+            setAdding(true)
+            setMsg('')
+          }}
+        >
+          Edit customer
+        </button>
+
         <button
           className="link"
           onClick={() => archive(sel.id)}
@@ -244,7 +295,7 @@ export default function CustomersView({
 
     return (
       <div className="card">
-        <h2>Add customer</h2>
+        <h2>{editingId ? 'Edit customer' : 'Add customer'}</h2>
 
         <label>
           Name
@@ -318,6 +369,16 @@ export default function CustomersView({
           />
         </label>
 
+        <label>
+          Notes (optional)
+          <textarea
+            rows={3}
+            placeholder="e.g. Meets reps after 4 PM, prefers samples of the new syrup"
+            value={f.notes}
+            onChange={set('notes')}
+          />
+        </label>
+
         {msg && <p className="msg">{msg}</p>}
 
         <button
@@ -325,15 +386,18 @@ export default function CustomersView({
           disabled={busy}
           onClick={save}
         >
-          {busy ? 'Saving…' : 'Save customer'}
+          {busy ? 'Saving…' : editingId ? 'Save changes' : 'Save customer'}
         </button>
 
         <button
           className="link"
           onClick={() => {
+            const backTo = editingId
             setAdding(false)
+            setEditingId(null)
             setMsg('')
             setF(empty)
+            if (backTo) setSelected(backTo)
           }}
         >
           Cancel
@@ -348,6 +412,7 @@ export default function CustomersView({
         className="primary"
         onClick={() => {
           setAdding(true)
+          setEditingId(null)
           setMsg('')
           setF(empty)
         }}
