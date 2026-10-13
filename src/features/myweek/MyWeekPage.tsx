@@ -13,6 +13,7 @@ import {
 } from '../../lib/personalEvents'
 import { activeSales, activeSalesTotal } from '../../lib/rules'
 import EventForm from './EventForm'
+import { visitNoteLines } from '../../lib/visitHistory'
 
 const cap = (s: string) =>
   s.charAt(0).toUpperCase() + s.slice(1)
@@ -511,12 +512,13 @@ export default function MyWeekPage({
                     <b>Visit: {visitCustomerName(visit)}</b>
                     <br />
                     <span className="small">Customer visit · To visit</span>
-                    {visit.notes && (
-                      <>
+                    {/* C21: rescheduling history in plain words, then the salesperson's note */}
+                    {visitNoteLines(visit.notes).map((line, i) => (
+                      <span key={i}>
                         <br />
-                        <span className="small">{visit.notes}</span>
-                      </>
-                    )}
+                        <span className="small">{line}</span>
+                      </span>
+                    ))}
                   </span>
                   <span style={{ textAlign: 'right', flexShrink: 0 }}>
                     <span className="small">{formatTimeIST(visit.planned_start)}</span>
