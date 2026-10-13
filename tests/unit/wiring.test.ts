@@ -373,3 +373,34 @@ test('C21: My Week and the visit screen show history in plain words, not the raw
   assert.doesNotMatch(detail, /\{visit\.notes\}/)
   assert.match(detail, /visitNoteLines\(pre\.lastVisit\.notes\)/)
 })
+
+// ---------- R1: TODAY ----------
+
+test('R1: TODAY shows the Next action card from the shared rule, scoped to this user', () => {
+  const src = read('src/features/today/TodayPage.tsx')
+  assert.match(src, /nextAction\(\{ now: new Date\(\), visits: plan\.visits, followUps: plan\.followUps, homeTime: profile\.preferred_home_time \}\)/)
+  assert.match(src, /\.from\('visits'\)\s*\.select\('status,planned_start,customers\(name\)'\)\s*\.eq\('user_id', profile\.id\)/)
+  assert.match(src, /\.from\('follow_ups'\)\s*\.select\('due_date,action,customers\(name\)'\)\s*\.eq\('user_id', profile\.id\)\s*\.eq\('status', 'open'\)/)
+  assert.match(src, /Could not load your plan/)   // shows the problem instead of guessing
+})
+
+test('R1: TODAY ignores cancelled events and only real dates trigger the date message', () => {
+  const src = read('src/features/today/TodayPage.tsx')
+  assert.match(src, /event\.status !== 'cancelled'/)
+  assert.match(src, /const isDatingDay = isRomanticDate\(eventText\)/)
+  assert.doesNotMatch(src, /eventText\.includes\('date'\)/)
+})
+
+test('R1: LIFE shows the privacy note, with no location tracking and no manager reporting', () => {
+  const src = read('src/features/life/LifePage.tsx')
+  assert.match(src, /<h2>Your data<\/h2>/)
+  assert.match(src, /does not track your location/)
+  assert.match(src, /does not report to your\s+company or manager/)
+})
+
+test('R1: still no location tracking anywhere in the app', () => {
+  const files = readdirSync(new URL('../../src/features', import.meta.url), { recursive: true }) as string[]
+  for (const f of files.filter(f => f.endsWith('.tsx'))) {
+    assert.doesNotMatch(read('src/features/' + f), /navigator\.geolocation/, f)
+  }
+})

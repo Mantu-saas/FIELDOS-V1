@@ -1,4 +1,13 @@
 # Changelog
+## 2026-10-13 — R1: pilot release (branch release/r1-pilot, NOT merged, NOT deployed)
+
+- Combines fix/v1-reliability and C21 (fix/c21-visit-record-guard); their 4 overlapping files were resolved by keeping both sides.
+- C21 database rules proven on the real test database by a rolled-back test (13 Oct): a stale second recording, a stale Remove and any action on another account's visit are all refused; no second sale; nothing was left behind (before/after snapshots identical).
+- TODAY: new "Next action" card at the top, from fixed rules on the user's own data (src/lib/nextAction.ts): record a missed visit → wrap up near home time → overdue/due follow-up → next visit → plan tomorrow. Shows the reason and counts; shows an error instead of guessing when data can't load.
+- TODAY: the "date" message now appears only for real dates ("date night", "dinner date"…), not for "Update stock" or "Due date"; cancelled personal events no longer shape the day's message.
+- LIFE: "Your data" privacy note for pilot users.
+- Production database structure checked read-only (13 Oct, from the founder's export): all tables and fields the app needs are present; privacy rules on for every table.
+- Verification: unit tests pass (see commit). Full build/type check and browser: see the release notes for what could and could not be run.
 ## 2026-10-13 — C21: safe "Record visit" / "Remove", and rescheduling history kept (branch fix/c21-visit-record-guard, NOT pushed, NOT merged, NOT deployed)
 
 - Found in the Archana / Debasis investigation (read-only). "Rescheduled from 2026-10-11 (Cancelled)" is the replacement visit's own note, written on purpose by Reschedule; the original visit is never changed.

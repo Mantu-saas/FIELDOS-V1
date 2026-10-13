@@ -6,6 +6,10 @@ import { activeSalesTotal } from '../../lib/rules'
 import { isToday, loadWeekEvents, weekStartMonday } from '../../lib/personalEvents'
 import type { PersonalEvent } from '../../lib/personalEvents'
 import type { Profile } from '../../types'
+import { isRomanticDate } from '../../lib/todayMood'
+import { nextAction } from '../../lib/nextAction'
+import type { NextActionFollowUp, NextActionVisit } from '../../lib/nextAction'
+import { addDaysStr as addDays } from '../../lib/personalEvents'
 
 export default function TodayPage({ profile }: { profile: Profile }) {
   const [rows, setRows] = useState<
@@ -16,6 +20,47 @@ export default function TodayPage({ profile }: { profile: Profile }) {
   const [todayEvents, setTodayEvents] = useState<PersonalEvent[]>([])
 
   const today = todayIST()
+
+  // R1: data for the "Next action" card (today's and tomorrow's visits, follow-ups due)
+  const [plan, setPlan] = useState<{ visits: NextActionVisit[]; followUps: NextActionFollowUp[] } | null>(null)
+  const [planError, setPlanError] = useState('')
+
+  useEffect(() => {
+    let ignore = false
+    const nameOf = (c: unknown): string => {
+      const one = Array.isArray(c) ? c[0] : c
+      return (one as { name?: string } | null)?.name || 'Customer'
+    }
+    async function loadPlan() {
+      const [v, f] = await Promise.all([
+        supabase
+          .from('visits')
+          .select('status,planned_start,customers(name)')
+          .eq('user_id', profile.id)
+          .gte('planned_start', `${today}T00:00:00+05:30`)
+          .lt('planned_start', `${addDays(today, 2)}T00:00:00+05:30`),
+        supabase
+          .from('follow_ups')
+          .select('due_date,action,customers(name)')
+          .eq('user_id', profile.id)
+          .eq('status', 'open')
+          .lte('due_date', today)
+      ])
+      if (ignore) return
+      if (v.error || f.error) {
+        setPlanError('Could not load your plan: ' + (v.error?.message ?? f.error?.message))
+        return
+      }
+      setPlan({
+        visits: (v.data ?? []).map(r => ({ status: r.status as string, planned_start: r.planned_start as string | null, name: nameOf(r.customers) })),
+        followUps: (f.data ?? []).map(r => ({ due_date: r.due_date as string, action: r.action as string, name: nameOf(r.customers) }))
+      })
+    }
+    loadPlan()
+    return () => {
+      ignore = true
+    }
+  }, [profile.id, today])
 
   useEffect(() => {
     supabase
@@ -55,7 +100,9 @@ export default function TodayPage({ profile }: { profile: Profile }) {
       }
 
       setTodayEvents(
+        // R1: cancelled events no longer shape the day's message
         result.events.filter((event) =>
+          event.status !== 'cancelled' &&
           isToday(new Date(event.starts_at))
         )
       )
@@ -113,9 +160,8 @@ export default function TodayPage({ profile }: { profile: Profile }) {
     ? `${primaryEvent.title} ${primaryEvent.category}`.toLowerCase()
     : ''
 
-  const isDatingDay =
-    eventText.includes('dating') ||
-    eventText.includes('date')
+  // R1: only real dates ("date night", "dinner date"…), not "Update" or "Due date"
+  const isDatingDay = isRomanticDate(eventText)
 
   const isFamilyDay =
     primaryEvent?.category === 'family' ||
@@ -193,8 +239,28 @@ export default function TodayPage({ profile }: { profile: Profile }) {
       'Your average so far is at or above what the rest of the month needs.'
   }
 
+  // R1: one next action, with its reason, from the user's own saved data
+  const next = plan ? nextAction({ now: new Date(), visits: plan.visits, followUps: plan.followUps, homeTime: profile.preferred_home_time }) : null
+
   return (
     <div className="stack">
+      <div className="card">
+        <p className="small">Next action</p>
+        {planError ? (
+          <p className="msg">{planError}</p>
+        ) : !next ? (
+          <p>Loading your plan...</p>
+        ) : (
+          <>
+            <h2>{next.title}</h2>
+            <p>{next.reason}</p>
+            <p className="small">
+              Visits left today: {next.visitsLeft} · Follow-ups due: {next.followUpsDue}
+            </p>
+          </>
+        )}
+      </div>
+
       {primaryEvent && dayHeadline && (
         <div className="card">
           <p className="small">Swayam • Today's mood</p>
