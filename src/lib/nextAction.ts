@@ -85,7 +85,7 @@ export function nextAction(input: {
   if (home !== null && now.minutes >= home - WRAP_UP_MINUTES) {
     const first = plannedLater[0]
     const when = now.minutes < home
-      ? `Home time ${clock(home)} is in ${home - now.minutes} minutes.`
+      ? `Home time ${clock(home)} is in ${home - now.minutes} minute${home - now.minutes === 1 ? '' : 's'}.`
       : `Your home time (${clock(home)}) has passed.`
     const tomorrow = first
       ? ` Tomorrow starts with ${first.name} at ${clock(first.at.minutes)}.`

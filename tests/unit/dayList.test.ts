@@ -43,3 +43,8 @@ test('tomorrow shows only tomorrow, no overdue items', () => {
   assert.deepEqual(list.map(i => i.id), ['f2', 'v3'])
   assert.ok(list.every(i => !i.late))
 })
+
+test('overdue follow-ups show a short date', () => {
+  const list = buildDayList({ day: D, today: D, nowMinutes: 12 * 60, visits: [], followUps, events: [] })
+  assert.equal(list.find(i => i.id === 'f1')!.detail, '₹5,000 · Overdue since 14 Oct')
+})

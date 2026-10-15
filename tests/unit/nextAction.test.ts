@@ -98,3 +98,8 @@ test('a personal task ahead today comes before "done"', () => {
   const done = nextAction({ now, visits: [], followUps: [], homeTime: null, events: [{ title: 'Test', starts_at: '2026-10-15T18:40:00+05:30', all_day: false, status: 'completed' }] })
   assert.equal(done.kind, 'done')
 })
+
+test('"1 minute", not "1 minutes"', () => {
+  const r = nextAction({ now: new Date('2026-10-15T18:59:00+05:30'), visits: [], followUps: [], homeTime: '19:00:00' })
+  assert.match(r.reason, /is in 1 minute\./)
+})

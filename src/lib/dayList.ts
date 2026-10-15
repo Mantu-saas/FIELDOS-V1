@@ -28,6 +28,12 @@ function istMin(iso: string): number {
   const p = new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso))
   return Number(p.find(x => x.type === 'hour')?.value) * 60 + Number(p.find(x => x.type === 'minute')?.value)
 }
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// "2026-10-14" -> "14 Oct"
+function shortDate(day: string): string {
+  const [, m, d] = day.split('-').map(Number)
+  return `${d} ${MONTHS[m - 1]}`
+}
 function money(n: number): string {
   return '₹' + Math.round(n).toLocaleString('en-IN')
 }
@@ -88,7 +94,7 @@ export function buildDayList(input: {
       id: f.id,
       minutes: null,
       title: `${f.name}: ${f.action}`,
-      detail: (Number(f.expected_value) > 0 ? money(Number(f.expected_value)) + ' · ' : '') + (overdue ? `Overdue since ${f.due_date}` : 'Follow-up'),
+      detail: (Number(f.expected_value) > 0 ? money(Number(f.expected_value)) + ' · ' : '') + (overdue ? `Overdue since ${shortDate(f.due_date)}` : 'Follow-up'),
       done: f.status === 'done',
       late: overdue
     })
