@@ -88,3 +88,13 @@ test('home time parsing accepts saved formats and rejects bad ones', () => {
   assert.equal(homeMinutes(null), null)
   assert.equal(homeMinutes('7pm'), null)
 })
+
+// R3: a task still ahead today is the next action; the card never says "done" before it
+test('a personal task ahead today comes before "done"', () => {
+  const now = new Date('2026-10-15T18:33:00+05:30')
+  const r = nextAction({ now, visits: [], followUps: [], homeTime: null, events: [{ title: 'Test', starts_at: '2026-10-15T18:40:00+05:30', all_day: false, status: 'planned' }] })
+  assert.equal(r.kind, 'task')
+  assert.equal(r.title, 'Test at 6:40 PM')
+  const done = nextAction({ now, visits: [], followUps: [], homeTime: null, events: [{ title: 'Test', starts_at: '2026-10-15T18:40:00+05:30', all_day: false, status: 'completed' }] })
+  assert.equal(done.kind, 'done')
+})

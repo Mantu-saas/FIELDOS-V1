@@ -242,7 +242,7 @@ export default function TodayPage({ profile, onOpenRoute }: { profile: Profile; 
   }
 
   // R1: one next action, with its reason, from the user's own saved data
-  const next = plan ? nextAction({ now: new Date(), visits: plan.visits, followUps: plan.followUps, homeTime: profile.preferred_home_time }) : null
+  const next = plan ? nextAction({ now: new Date(), visits: plan.visits, followUps: plan.followUps, homeTime: profile.preferred_home_time, events: todayEvents }) : null
 
   return (
     <div className="stack">

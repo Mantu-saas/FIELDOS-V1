@@ -10,9 +10,11 @@
 
 export type NextActionVisit = { status: string; planned_start: string | null; name: string }
 export type NextActionFollowUp = { due_date: string; action: string; name: string }
+// R3: personal events / quick-add tasks also count, so the card never says "done" while a task is still ahead
+export type NextActionEvent = { title: string; starts_at: string; all_day: boolean; status: string }
 
 export type NextAction = {
-  kind: 'record' | 'wrap_up' | 'follow_up' | 'visit' | 'done'
+  kind: 'record' | 'wrap_up' | 'follow_up' | 'visit' | 'task' | 'done'
   title: string
   reason: string
   visitsLeft: number
@@ -54,6 +56,7 @@ export function nextAction(input: {
   visits: NextActionVisit[]        // today's and tomorrow's visits, any status
   followUps: NextActionFollowUp[]  // open follow-ups due today or earlier
   homeTime: string | null | undefined
+  events?: NextActionEvent[]       // R3: today's personal events / tasks
 }): NextAction {
   const now = istParts(input.now)
   const today = now.date
@@ -102,8 +105,16 @@ export function nextAction(input: {
     }
   }
 
-  // 4. The next planned visit today
-  const next = plannedToday[0]
+  // 4. The next planned visit today, or a task that comes before it (R3)
+  const next = plannedToday.find(v => v.at.minutes >= now.minutes - GRACE_MINUTES) ?? plannedToday[0]
+  const task = (input.events ?? [])
+    .filter(e => e.status === 'planned' && !e.all_day && !Number.isNaN(new Date(e.starts_at).getTime()))
+    .map(e => ({ ...e, at: istParts(new Date(e.starts_at)) }))
+    .filter(e => e.at.date === today && e.at.minutes >= now.minutes - GRACE_MINUTES)
+    .sort((a, b) => a.at.minutes - b.at.minutes)[0]
+  if (task && (!next || task.at.minutes < next.at.minutes)) {
+    return { ...base, kind: 'task', title: `${task.title} at ${clock(task.at.minutes)}`, reason: 'Next thing in your checklist today.' }
+  }
   if (next) {
     const left = plannedToday.length
     return { ...base, kind: 'visit', title: `Go to ${next.name} at ${clock(next.at.minutes)}`, reason: `${left} visit${left === 1 ? '' : 's'} left today.` }

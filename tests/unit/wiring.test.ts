@@ -379,7 +379,7 @@ test('C21: My Week and the visit screen show history in plain words, not the raw
 
 test('R1: TODAY shows the Next action card from the shared rule, scoped to this user', () => {
   const src = read('src/features/today/TodayPage.tsx')
-  assert.match(src, /nextAction\(\{ now: new Date\(\), visits: plan\.visits, followUps: plan\.followUps, homeTime: profile\.preferred_home_time \}\)/)
+  assert.match(src, /nextAction\(\{ now: new Date\(\), visits: plan\.visits, followUps: plan\.followUps, homeTime: profile\.preferred_home_time, events: todayEvents \}\)/)
   assert.match(src, /\.from\('visits'\)\s*\.select\('status,planned_start,customers\(name\)'\)\s*\.eq\('user_id', profile\.id\)/)
   assert.match(src, /\.from\('follow_ups'\)\s*\.select\('due_date,action,customers\(name\)'\)\s*\.eq\('user_id', profile\.id\)\s*\.eq\('status', 'open'\)/)
   assert.match(src, /Could not load your plan/)   // shows the problem instead of guessing
@@ -445,4 +445,15 @@ test('R2: My Week lets a planned doctor visit be moved in place, with the same s
   const move = read('src/features/visits/ChangeVisitTime.tsx')
   assert.match(move, /\.eq\('id', visit\.id\)\s*\.eq\('user_id', userId\)\s*\.eq\('customer_id', visit\.customer_id\)\s*\.eq\('status', 'planned'\)/)
   assert.match(move, /result\.data\.length !== 1/)
+})
+
+test('R3: TODAY shows the day checklist and the reminders card; sign-out stops this phone\'s reminders', () => {
+  const today = read('src/features/today/TodayPage.tsx')
+  assert.match(today, /<RemindersCard \/>/)
+  assert.match(today, /<DayChecklist userId=\{profile\.id\} onOpenRoute=\{onOpenRoute\} \/>/)
+  const shell = read('src/pages/Shell.tsx')
+  assert.match(shell, /await disablePush\(\)\.catch\(\(\) => undefined\)\s*await supabase\.auth\.signOut\(\)/)
+  const list = read('src/features/today/DayChecklist.tsx')
+  // every change is limited to this person's own rows
+  assert.equal((list.match(/\.update\(/g) ?? []).length, (list.match(/\.update\([\s\S]*?\.eq\('user_id', userId\)/g) ?? []).length)
 })
