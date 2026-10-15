@@ -48,3 +48,8 @@ select, textarea { display:block; width:100%; margin-top:6px; padding:12px; font
 /* Cancelled visits and sales: kept for history, never shown as live work or revenue */
 .cancelled-text { color:#b91c1c; text-decoration:line-through; }
 .cancelled-label { color:#b91c1c; font-size:12px; font-weight:800; letter-spacing:.04em; white-space:nowrap; }
+/* Public survey (/survey) */
+.chips { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 18px; }
+.chip { padding:10px 14px; border:1px solid #cbd5e1; border-radius:99px; background:#fff; color:var(--char); font-size:15px; text-align:left; }
+.chip.on { background:var(--emerald); border-color:var(--emerald); color:#fff; font-weight:600; }
+.survey-list { margin:0 0 12px; padding-left:20px; line-height:1.6; }
