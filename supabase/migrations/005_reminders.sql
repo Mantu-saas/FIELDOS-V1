@@ -46,9 +46,10 @@ begin
      or coalesce(length(p_auth), 0) not between 8 and 100 then
     raise exception 'Invalid subscription';
   end if;
-  delete from public.push_subscriptions where endpoint = p_endpoint;
   insert into public.push_subscriptions(user_id, endpoint, p256dh, auth)
-  values (auth.uid(), p_endpoint, p_p256dh, p_auth);
+  values (auth.uid(), p_endpoint, p_p256dh, p_auth)
+  on conflict (endpoint) do update
+    set user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, created_at = now(), last_sent_at = null;
 end;
 $$;
 revoke all on function public.save_push_subscription(text, text, text) from public, anon;
@@ -78,31 +79,17 @@ values ('cron_key', encode(extensions.gen_random_bytes(32), 'hex')),
 on conflict (name) do nothing;
 
 -- 4. Every 5 minutes, ask the "reminders" function to send what is due
+-- (does nothing until functions_url is set, see the top of this file)
 create extension if not exists pg_cron;
-create extension if not exists pg_net;
-
-create or replace function public.run_reminders()
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  fn_url text := (select value from public.app_secrets where name = 'functions_url');
-  key text := (select value from public.app_secrets where name = 'cron_key');
-begin
-  if fn_url is null or key is null then
-    return;
-  end if;
-  perform net.http_post(
-    url := fn_url || '?op=send',
-    headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-key', key),
-    body := '{}'::jsonb,
-    timeout_milliseconds := 30000
-  );
-end;
-$$;
-revoke all on function public.run_reminders() from public, anon, authenticated;
+create extension if not exists pg_net with schema extensions;
 
 select cron.unschedule(jobid) from cron.job where jobname = 'swayam-reminders';
-select cron.schedule('swayam-reminders', '*/5 * * * *', 'select public.run_reminders()');
+select cron.schedule('swayam-reminders', '*/5 * * * *', $cron$
+  select net.http_post(
+    url := (select value from public.app_secrets where name = 'functions_url') || '?op=send',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-key', (select value from public.app_secrets where name = 'cron_key')),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 30000
+  )
+  where exists (select 1 from public.app_secrets where name = 'functions_url')
+$cron$);
