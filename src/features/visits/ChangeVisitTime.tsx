@@ -11,17 +11,21 @@ import { STOP_BLOCKING_STATUSES } from '../../lib/rules'
 export default function ChangeVisitTime({
   userId,
   visit,
-  onSaved
+  onSaved,
+  startOpen = false,
+  onCancel
 }: {
   userId: string
   visit: VisitRow
   onSaved: () => void
+  startOpen?: boolean      // R3: the day checklist opens the form straight away
+  onCancel?: () => void
 }) {
   const today = todayIST()
   const currentDate = istDateOf(visit.planned_start) ?? today
   const currentTime = istClockOf(visit.planned_start) ?? ''
 
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(startOpen)
   const [date, setDate] = useState(currentDate)
   const [time, setTime] = useState(currentTime)
   const [busy, setBusy] = useState(false)
@@ -103,7 +107,7 @@ export default function ChangeVisitTime({
       <button
         className="link"
         disabled={busy}
-        onClick={() => { setOpen(false); setDate(currentDate); setTime(currentTime); setMsg('') }}
+        onClick={() => { setOpen(false); setDate(currentDate); setTime(currentTime); setMsg(''); onCancel?.() }}
       >
         Cancel
       </button>

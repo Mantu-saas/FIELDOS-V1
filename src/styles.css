@@ -48,3 +48,21 @@ select, textarea { display:block; width:100%; margin-top:6px; padding:12px; font
 /* Cancelled visits and sales: kept for history, never shown as live work or revenue */
 .cancelled-text { color:#b91c1c; text-decoration:line-through; }
 .cancelled-label { color:#b91c1c; font-size:12px; font-weight:800; letter-spacing:.04em; white-space:nowrap; }
+
+/* R3: day checklist + quick add */
+.checklist-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.quick-add { display:flex; gap:8px; margin:12px 0 4px; }
+.quick-add input { flex:1; min-width:0; margin:0; }
+.quick-add .primary { width:auto; padding:0 16px; margin:0; }
+.checklist { list-style:none; margin:12px 0 0; padding:0; }
+.checklist li { border-top:1px solid #e2e8f0; padding:10px 0; }
+.check-row { display:flex; gap:12px; align-items:flex-start; }
+.check-text { display:flex; flex-direction:column; gap:2px; min-width:0; overflow-wrap:anywhere; }
+.tick { flex:none; width:30px; height:30px; border-radius:8px; border:2px solid var(--emerald); background:#fff; color:#fff; font-weight:800; font-size:16px; line-height:26px; text-align:center; padding:0; }
+span.tick { border-color:#cbd5e1; color:var(--slate); }
+.checklist li.done .tick { background:var(--emerald); border-color:var(--emerald); color:#fff; }
+.checklist li.done b { text-decoration:line-through; color:#64748b; }
+.checklist li.late .check-text > .small:first-child { color:#b91c1c; font-weight:700; }
+.check-actions { display:flex; gap:16px; padding-left:42px; margin-top:4px; }
+.check-actions .link { width:auto; padding:4px 0; }
+.check-edit { padding:8px 0 0 42px; }

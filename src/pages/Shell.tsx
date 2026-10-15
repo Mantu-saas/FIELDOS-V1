@@ -9,6 +9,7 @@ import RoutePage from '../features/route/RoutePage'
 import HealthPage from '../features/health/HealthPage'
 import CoachPage from '../features/coach/CoachPage'
 import LifePage from '../features/life/LifePage'
+import { disablePush } from '../lib/pushReminders'
 
 const TABS = ['TODAY', 'SALES', 'ROUTE', 'HEALTH', 'COACH', 'LIFE'] as const
 type Tab = (typeof TABS)[number]
@@ -28,7 +29,14 @@ export default function Shell({ profile }: { profile: Profile }) {
     <div className="shell">
       <header>
         <span className="logo">swayam</span>
-        <button className="link light" onClick={() => supabase.auth.signOut()}>Sign out</button>
+        <button
+          className="link light"
+          onClick={async () => {
+            // R3: this phone stops getting this person's reminders once they sign out
+            await disablePush().catch(() => undefined)
+            await supabase.auth.signOut()
+          }}
+        >Sign out</button>
       </header>
       <main>
         <div className="content">
@@ -41,7 +49,7 @@ export default function Shell({ profile }: { profile: Profile }) {
                 <span><b>My Week</b><br /><span className="small">Work, family and personal time in one view</span></span>
                 <span>→</span>
               </button>
-              <TodayPage key={tab} profile={profile} />
+              <TodayPage key={tab} profile={profile} onOpenRoute={() => openTab('ROUTE')} />
             </div>
           )}
           {tab === 'SALES' && (

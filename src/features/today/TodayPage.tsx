@@ -10,8 +10,10 @@ import { isRomanticDate } from '../../lib/todayMood'
 import { nextAction } from '../../lib/nextAction'
 import type { NextActionFollowUp, NextActionVisit } from '../../lib/nextAction'
 import { addDaysStr as addDays } from '../../lib/personalEvents'
+import DayChecklist from './DayChecklist'
+import RemindersCard from './RemindersCard'
 
-export default function TodayPage({ profile }: { profile: Profile }) {
+export default function TodayPage({ profile, onOpenRoute }: { profile: Profile; onOpenRoute?: () => void }) {
   const [rows, setRows] = useState<
     { amount: number; sale_date: string; status: string }[] | null
   >(null)
@@ -260,6 +262,10 @@ export default function TodayPage({ profile }: { profile: Profile }) {
           </>
         )}
       </div>
+
+      {/* R3: one checklist for the day + phone reminders */}
+      <RemindersCard />
+      <DayChecklist userId={profile.id} onOpenRoute={onOpenRoute} />
 
       {primaryEvent && dayHeadline && (
         <div className="card">
